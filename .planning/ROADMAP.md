@@ -84,11 +84,11 @@ Plans:
   2. When the user speaks while Sarah is talking, Sarah stops immediately (barge-in) and the browser stops playing buffered audio -- no overlapping speech
   3. The UI shows real-time connection status (connecting/connected/ended), call duration timer, and audio activity indicators for both user and agent
   4. The full qualification flow (greeting, questions, recommendation, objection handling, close) works end-to-end through the browser
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 04-01: TBD
-- [ ] 04-02: TBD
+- [ ] 04-01-PLAN.md -- Backend modifications (transcript forwarding + REST endpoints) and frontend audio infrastructure (AudioWorklet, PCM utils, useVoiceSession hook)
+- [ ] 04-02-PLAN.md -- React UI components (PreCallScreen, ActiveCallScreen, PostCallScreen), audio visualization, transcript panel, and visual verification checkpoint
 
 ### Phase 5: Cloud Run Deployment
 **Goal**: Backend and frontend deployed to Cloud Run via Terraform infrastructure-as-code, providing the mandatory GCP deployment proof and IaC bonus for the competition
