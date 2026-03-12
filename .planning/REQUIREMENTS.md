@@ -1,7 +1,7 @@
 # Requirements: Cloudboosta AI Sales Agent
 
 **Defined:** 2026-03-12
-**Core Value:** Sarah (the AI voice agent) must conduct a natural qualification call, recommend the right programme, handle objections, and produce a clear outcome (COMMITTED / FOLLOW_UP / DECLINED) — the revenue moment.
+**Core Value:** Sarah (the AI voice agent) must conduct a natural qualification call, recommend the right programme, handle objections, and produce a clear outcome (COMMITTED / FOLLOW_UP / DECLINED) -- the revenue moment.
 
 ## v1 Requirements
 
@@ -38,13 +38,13 @@ Requirements for Wave 0 launch (10 test leads). Each maps to roadmap phases.
 - [ ] **OUTR-01**: n8n detects new leads and triggers WhatsApp outreach via OpenClaw
 - [ ] **OUTR-02**: n8n triggers parallel email outreach via Resend API
 - [ ] **OUTR-03**: WhatsApp outreach message includes heads-up about incoming US number call
-- [ ] **OUTR-04**: Duplicate channel handling — first response (WhatsApp or email) wins, other channel gets "already scheduled"
+- [ ] **OUTR-04**: Duplicate channel handling -- first response (WhatsApp or email) wins, other channel gets "already scheduled"
 
 ### Booking
 
 - [ ] **BOOK-01**: OpenClaw handles free-text booking conversation (lead says a time, OpenClaw confirms naturally)
 - [ ] **BOOK-02**: n8n sends 1-hour WhatsApp reminder before scheduled call
-- [ ] **BOOK-03**: Retry logic — 2 retries at different intervals if lead doesn't answer, then WhatsApp follow-up
+- [ ] **BOOK-03**: Retry logic -- 2 retries at different intervals if lead doesn't answer, then WhatsApp follow-up
 
 ### Post-Call
 
@@ -66,15 +66,15 @@ Deferred to Wave 1 (200 leads) after core pipeline validates.
 
 ### Monitoring
 
-- **MONR-01**: Stuck lead detection — 15-minute cron checks for leads in limbo (no response after 48hrs, past-due calls, unpaid after 96hrs)
-- **MONR-02**: Service health checks — 5-minute cron pings Cloud Run, Supabase, OpenClaw
+- **MONR-01**: Stuck lead detection -- 15-minute cron checks for leads in limbo (no response after 48hrs, past-due calls, unpaid after 96hrs)
+- **MONR-02**: Service health checks -- 5-minute cron pings Cloud Run, Supabase, OpenClaw
 - **MONR-03**: Daily metrics email digest at 9pm GMT (leads contacted, calls made, commitments, conversion rate)
 - **MONR-04**: 96-hour second payment reminder for committed but unpaid leads
 - **MONR-05**: Rate limiting enforcement (50/day outreach cap for WhatsApp)
 
 ### Analytics
 
-- **ANLT-01**: Objection tracking — which objections come up most, inform PDF updates
+- **ANLT-01**: Objection tracking -- which objections come up most, inform PDF updates
 - **ANLT-02**: Call duration tracking with alerts for too short (<2min) or too long (>15min)
 
 ## Out of Scope
@@ -101,13 +101,44 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| *(populated by roadmapper)* | | |
+| DATA-01 | Phase 2: Data Layer | Pending |
+| DATA-02 | Phase 2: Data Layer | Pending |
+| DATA-03 | Phase 2: Data Layer | Pending |
+| DATA-04 | Phase 2: Data Layer | Pending |
+| CALL-01 | Phase 3: Voice Agent Backend | Pending |
+| CALL-02 | Phase 3: Voice Agent Backend | Pending |
+| CALL-03 | Phase 3: Voice Agent Backend | Pending |
+| CALL-04 | Phase 3: Voice Agent Backend | Pending |
+| CALL-05 | Phase 3: Voice Agent Backend | Pending |
+| CALL-06 | Phase 3: Voice Agent Backend | Pending |
+| CALL-07 | Phase 6: Twilio Integration | Pending |
+| CALL-08 | Phase 3: Voice Agent Backend | Pending |
+| CALL-09 | Phase 5: Cloud Run Deployment | Pending |
+| CALL-10 | Phase 3: Voice Agent Backend | Pending |
+| DEPL-01 | Phase 5: Cloud Run Deployment | Pending |
+| DEPL-02 | Phase 5: Cloud Run Deployment | Pending |
+| DEPL-03 | Phase 4: Browser Voice UI | Pending |
+| OUTR-01 | Phase 8: n8n Orchestration | Pending |
+| OUTR-02 | Phase 8: n8n Orchestration | Pending |
+| OUTR-03 | Phase 7: OpenClaw WhatsApp | Pending |
+| OUTR-04 | Phase 7: OpenClaw WhatsApp | Pending |
+| BOOK-01 | Phase 7: OpenClaw WhatsApp | Pending |
+| BOOK-02 | Phase 8: n8n Orchestration | Pending |
+| BOOK-03 | Phase 8: n8n Orchestration | Pending |
+| POST-01 | Phase 8: n8n Orchestration | Pending |
+| POST-02 | Phase 8: n8n Orchestration | Pending |
+| POST-03 | Phase 8: n8n Orchestration | Pending |
+| POST-04 | Phase 8: n8n Orchestration | Pending |
+| POST-05 | Phase 8: n8n Orchestration | Pending |
+| INTG-01 | Phase 6: Twilio Integration | Pending |
+| INTG-02 | Phase 7: OpenClaw WhatsApp | Pending |
+| INTG-03 | Phase 8: n8n Orchestration | Pending |
 
 **Coverage:**
-- v1 requirements: 27 total
-- Mapped to phases: 0
-- Unmapped: 27
+- v1 requirements: 32 total
+- Mapped to phases: 32
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-12*
-*Last updated: 2026-03-12 after initial definition*
+*Last updated: 2026-03-12 after roadmap creation*
