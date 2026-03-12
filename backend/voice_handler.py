@@ -241,7 +241,7 @@ async def handle_voice_session(websocket: WebSocket, lead_id: str) -> None:
                             except WebSocketDisconnect:
                                 return
 
-                # Capture user speech transcription
+                # Capture user speech transcription + forward to browser
                 if (
                     hasattr(event, "input_transcription")
                     and event.input_transcription
@@ -250,8 +250,16 @@ async def handle_voice_session(websocket: WebSocket, lead_id: str) -> None:
                     call_session.append_user_transcript(
                         event.input_transcription.text
                     )
+                    try:
+                        await websocket.send_json({
+                            "type": "transcript",
+                            "speaker": "user",
+                            "text": event.input_transcription.text,
+                        })
+                    except WebSocketDisconnect:
+                        return
 
-                # Capture agent speech transcription
+                # Capture agent speech transcription + forward to browser
                 if (
                     hasattr(event, "output_transcription")
                     and event.output_transcription
@@ -260,6 +268,14 @@ async def handle_voice_session(websocket: WebSocket, lead_id: str) -> None:
                     call_session.append_agent_transcript(
                         event.output_transcription.text
                     )
+                    try:
+                        await websocket.send_json({
+                            "type": "transcript",
+                            "speaker": "agent",
+                            "text": event.output_transcription.text,
+                        })
+                    except WebSocketDisconnect:
+                        return
         except WebSocketDisconnect:
             pass
         except Exception as exc:
