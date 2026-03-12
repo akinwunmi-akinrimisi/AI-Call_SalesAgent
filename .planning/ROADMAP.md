@@ -48,11 +48,11 @@ Plans:
   2. Supabase sales_agent schema contains leads, call_logs, and pipeline_logs tables with correct columns and constraints, isolated from existing public schema tables
   3. Firestore collections contain parsed content from all 5 PDFs, and a test query returns relevant programme details (name, price, description)
   4. Writing a test event to pipeline_logs succeeds and the record is queryable with timestamp, event type, and lead_id
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 02-01: TBD
-- [ ] 02-02: TBD
+- [ ] 02-01-PLAN.md -- Deploy Supabase sales_agent schema, update logger.py, implement CSV lead import
+- [ ] 02-02-PLAN.md -- Implement and execute Firestore knowledge base seeder from 5 PDFs
 
 ### Phase 3: Voice Agent Backend
 **Goal**: Sarah can hold a complete qualification conversation -- greeting with AI disclosure, qualifying the lead, recommending a programme, handling objections, asking for commitment, and producing a clear outcome
