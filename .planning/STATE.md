@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in-progress
-stopped_at: Completed 03-02-PLAN.md
-last_updated: "2026-03-12T21:33:32Z"
-last_activity: 2026-03-12 -- Plan 03-02 complete (agent.py + call_manager.py + 20 tests)
+stopped_at: Completed 03-03-PLAN.md (Phase 3 COMPLETE)
+last_updated: "2026-03-12T21:47:34Z"
+last_activity: 2026-03-12 -- Plan 03-03 complete (voice_handler.py + main.py WebSocket + 52 total tests)
 progress:
   total_phases: 9
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 7
-  completed_plans: 6
-  percent: 86
+  completed_plans: 7
+  percent: 100
 ---
 
 # Project State
@@ -25,19 +25,19 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 
 ## Current Position
 
-Phase: 3 of 9 (Voice Agent Backend)
-Plan: 2 of 3 in current phase (03-02 complete)
-Status: Phase 3 in progress -- agent definition and call manager done, voice handler (WebSocket) next
-Last activity: 2026-03-12 -- Plan 03-02 complete (agent.py + call_manager.py + 20 tests)
+Phase: 3 of 9 (Voice Agent Backend) -- COMPLETE
+Plan: 3 of 3 in current phase (03-03 complete -- phase done)
+Status: Phase 3 COMPLETE -- all 3 plans executed (knowledge_loader, agent+call_manager, voice_handler+main)
+Last activity: 2026-03-12 -- Plan 03-03 complete (voice_handler.py + main.py WebSocket route + 9 integration tests)
 
-Progress: [█████████░] 86%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6
-- Average duration: 11min
-- Total execution time: 1.06 hours
+- Total plans completed: 7
+- Average duration: 10min
+- Total execution time: 1.19 hours
 
 **By Phase:**
 
@@ -45,10 +45,10 @@ Progress: [█████████░] 86%
 |-------|-------|-------|----------|
 | 1. Prerequisites | 2/2 | 29min | 15min |
 | 2. Data Layer | 2/2 | 27min | 14min |
-| 3. Voice Agent Backend | 2/3 | 8min | 4min |
+| 3. Voice Agent Backend | 3/3 | 16min | 5min |
 
 **Recent Trend:**
-- Last 5 plans: 01-02 (20min), 02-02 (15min), 02-01 (12min), 03-01 (3min), 03-02 (5min)
+- Last 5 plans: 02-02 (15min), 02-01 (12min), 03-01 (3min), 03-02 (5min), 03-03 (8min)
 - Trend: accelerating
 
 *Updated after each plan completion*
@@ -81,6 +81,10 @@ Recent decisions affecting current work:
 - [03-02]: Mock google.adk/genai via sys.modules in conftest.py -- avoids heavy ADK install for unit tests
 - [03-02]: CallSession stores qualification and outcome as separate dicts, written to Supabase independently in process_call_end
 - [03-02]: duration_watchdog uses asyncio.sleep with CancelledError for clean cancellation
+- [03-03]: Module-level Firestore AsyncClient singleton in voice_handler.py for reuse across calls
+- [03-03]: WebSocket close code 4004 for lead-not-found (custom application error code)
+- [03-03]: Tool state extraction via session_service.get_session reads ToolContext.state after streaming ends
+- [03-03]: google.cloud.firestore mock added to conftest.py for voice_handler import support
 
 ### Pending Todos
 
@@ -97,6 +101,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-12T21:33:32Z
-Stopped at: Completed 03-02-PLAN.md
-Resume file: .planning/phases/03-voice-agent-backend/03-02-SUMMARY.md
+Last session: 2026-03-12T21:47:34Z
+Stopped at: Completed 03-03-PLAN.md (Phase 3 COMPLETE)
+Resume file: .planning/phases/03-voice-agent-backend/03-03-SUMMARY.md
