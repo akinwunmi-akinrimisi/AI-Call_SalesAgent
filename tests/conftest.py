@@ -112,15 +112,14 @@ def mock_firestore_db():
     """Mock AsyncClient with 5 documents in knowledge_base collection."""
     db = MagicMock()
 
-    async def mock_get(doc_id):
-        if doc_id in MOCK_KB_CONTENT:
-            return _make_mock_doc(doc_id, MOCK_KB_CONTENT[doc_id])
-        return _make_missing_doc(doc_id)
-
     # Build the mock chain: db.collection("knowledge_base").document(doc_id).get()
     def mock_document(doc_id):
         doc_ref = MagicMock()
-        doc_ref.get = AsyncMock(side_effect=lambda: mock_get(doc_id))
+        if doc_id in MOCK_KB_CONTENT:
+            mock_doc = _make_mock_doc(doc_id, MOCK_KB_CONTENT[doc_id])
+        else:
+            mock_doc = _make_missing_doc(doc_id)
+        doc_ref.get = AsyncMock(return_value=mock_doc)
         return doc_ref
 
     collection_ref = MagicMock()
@@ -137,14 +136,13 @@ def mock_firestore_db_missing_one():
     db = MagicMock()
     available = {k: v for k, v in MOCK_KB_CONTENT.items() if k != "objection-handling"}
 
-    async def mock_get(doc_id):
-        if doc_id in available:
-            return _make_mock_doc(doc_id, available[doc_id])
-        return _make_missing_doc(doc_id)
-
     def mock_document(doc_id):
         doc_ref = MagicMock()
-        doc_ref.get = AsyncMock(side_effect=lambda: mock_get(doc_id))
+        if doc_id in available:
+            mock_doc = _make_mock_doc(doc_id, available[doc_id])
+        else:
+            mock_doc = _make_missing_doc(doc_id)
+        doc_ref.get = AsyncMock(return_value=mock_doc)
         return doc_ref
 
     collection_ref = MagicMock()
