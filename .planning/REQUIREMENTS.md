@@ -60,6 +60,17 @@ Requirements for Wave 0 launch (10 test leads). Each maps to roadmap phases.
 - [ ] **INTG-02**: OpenClaw WhatsApp connected to personal Nigerian number with rate limiting (10 messages/day for test)
 - [ ] **INTG-03**: n8n orchestration workflows in separate project folder (isolated from existing workflows)
 
+### Competition (Gemini Live Agent Challenge -- deadline 2026-03-16)
+
+- [ ] **COMP-01**: Natural interruption handling -- user can speak while Sarah is talking and Sarah stops immediately (barge-in), browser stops playing buffered audio
+- [ ] **COMP-02**: Audio activity visualization in browser UI showing when user and agent are speaking
+- [ ] **COMP-03**: Terraform infrastructure-as-code deploys all GCP resources (Cloud Run, Artifact Registry, IAM, Secret Manager) with `terraform apply`
+- [ ] **COMP-04**: Cloud deployment proof -- working Cloud Run URL accessible from the internet
+- [ ] **COMP-05**: README.md with project description, tech stack, local setup, and Terraform deployment instructions
+- [ ] **COMP-06**: Architecture diagram (PNG/SVG) showing Gemini integration, backend, database, and frontend
+- [ ] **COMP-07**: Demo video (max 4 minutes) showing live conversation, interruption handling, and Cloud Run deployment
+- [ ] **COMP-08**: Devpost submission text with features, technologies, and learnings
+
 ## v2 Requirements
 
 Deferred to Wave 1 (200 leads) after core pipeline validates.
@@ -111,34 +122,42 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CALL-04 | Phase 3: Voice Agent Backend | Complete |
 | CALL-05 | Phase 3: Voice Agent Backend | Complete |
 | CALL-06 | Phase 3: Voice Agent Backend | Complete |
-| CALL-07 | Phase 6: Twilio Integration | Pending |
+| CALL-07 | Phase 7: Twilio Integration | Deferred |
 | CALL-08 | Phase 3: Voice Agent Backend | Complete |
 | CALL-09 | Phase 5: Cloud Run Deployment | Pending |
 | CALL-10 | Phase 3: Voice Agent Backend | Complete |
 | DEPL-01 | Phase 5: Cloud Run Deployment | Pending |
 | DEPL-02 | Phase 5: Cloud Run Deployment | Pending |
 | DEPL-03 | Phase 4: Browser Voice UI | Pending |
-| OUTR-01 | Phase 8: n8n Orchestration | Pending |
-| OUTR-02 | Phase 8: n8n Orchestration | Pending |
-| OUTR-03 | Phase 7: OpenClaw WhatsApp | Pending |
-| OUTR-04 | Phase 7: OpenClaw WhatsApp | Pending |
-| BOOK-01 | Phase 7: OpenClaw WhatsApp | Pending |
-| BOOK-02 | Phase 8: n8n Orchestration | Pending |
-| BOOK-03 | Phase 8: n8n Orchestration | Pending |
-| POST-01 | Phase 8: n8n Orchestration | Pending |
-| POST-02 | Phase 8: n8n Orchestration | Pending |
-| POST-03 | Phase 8: n8n Orchestration | Pending |
-| POST-04 | Phase 8: n8n Orchestration | Pending |
-| POST-05 | Phase 8: n8n Orchestration | Pending |
-| INTG-01 | Phase 6: Twilio Integration | Pending |
-| INTG-02 | Phase 7: OpenClaw WhatsApp | Pending |
-| INTG-03 | Phase 8: n8n Orchestration | Pending |
+| COMP-01 | Phase 4: Browser Voice UI | Pending |
+| COMP-02 | Phase 4: Browser Voice UI | Pending |
+| COMP-03 | Phase 5: Cloud Run Deployment | Pending |
+| COMP-04 | Phase 5: Cloud Run Deployment | Pending |
+| COMP-05 | Phase 6: Submission Prep | Pending |
+| COMP-06 | Phase 6: Submission Prep | Pending |
+| COMP-07 | Phase 6: Submission Prep | Pending |
+| COMP-08 | Phase 6: Submission Prep | Pending |
+| OUTR-01 | Phase 9: n8n Orchestration | Deferred |
+| OUTR-02 | Phase 9: n8n Orchestration | Deferred |
+| OUTR-03 | Phase 8: OpenClaw WhatsApp | Deferred |
+| OUTR-04 | Phase 8: OpenClaw WhatsApp | Deferred |
+| BOOK-01 | Phase 8: OpenClaw WhatsApp | Deferred |
+| BOOK-02 | Phase 9: n8n Orchestration | Deferred |
+| BOOK-03 | Phase 9: n8n Orchestration | Deferred |
+| POST-01 | Phase 9: n8n Orchestration | Deferred |
+| POST-02 | Phase 9: n8n Orchestration | Deferred |
+| POST-03 | Phase 9: n8n Orchestration | Deferred |
+| POST-04 | Phase 9: n8n Orchestration | Deferred |
+| POST-05 | Phase 9: n8n Orchestration | Deferred |
+| INTG-01 | Phase 7: Twilio Integration | Deferred |
+| INTG-02 | Phase 8: OpenClaw WhatsApp | Deferred |
+| INTG-03 | Phase 9: n8n Orchestration | Deferred |
 
 **Coverage:**
-- v1 requirements: 32 total
-- Mapped to phases: 32
+- Competition requirements (COMP): 8 total, mapped to Phases 4-6
+- v1 requirements: 32 total, mapped to phases
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-12*
-*Last updated: 2026-03-12 after roadmap creation*
+*Last updated: 2026-03-12 after competition restructuring*

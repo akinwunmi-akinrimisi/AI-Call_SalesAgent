@@ -2,7 +2,7 @@
 
 ## Overview
 
-This roadmap delivers an automated AI sales pipeline for Cloudboosta in 9 phases. The critical path runs: Prerequisites (validate APIs) -> Data Layer (Supabase + Firestore) -> Voice Agent Backend (Sarah) -> Browser Voice UI (test without Twilio) -> Cloud Run Deployment (make accessible) -> Twilio Integration (real calls) -> n8n Orchestration (tie it all together) -> E2E Testing (10 real leads). OpenClaw WhatsApp (Phase 7) is independent and can be built in parallel with Phases 3-6. Every phase delivers a coherent, verifiable capability that unblocks the next.
+This roadmap delivers an AI voice sales agent (Sarah) for the **Gemini Live Agent Challenge** (Devpost, deadline 2026-03-16). Category: **Live Agents** -- real-time audio interaction with natural interruption handling. The critical path for competition: Voice Agent Backend -> Browser Voice UI (with interruption handling) -> Cloud Run Deployment (Terraform IaC) -> Submission Prep (README, architecture diagram, demo video). Post-competition phases (Twilio, WhatsApp, n8n, E2E) remain for the full product launch.
 
 ## Phases
 
@@ -12,15 +12,19 @@ This roadmap delivers an automated AI sales pipeline for Cloudboosta in 9 phases
 
 Decimal phases appear between their surrounding integers in numeric order.
 
+**COMPETITION CRITICAL PATH (deadline: 2026-03-16 5:00 PM PDT):**
 - [x] **Phase 1: Prerequisites** - Validate all external dependencies (APIs, accounts, PDFs) before building anything
 - [x] **Phase 2: Data Layer** - Deploy Supabase schema and Firestore knowledge base so every component has data to work with
-- [ ] **Phase 3: Voice Agent Backend** - Build Sarah (ADK agent with Gemini Live API) who can converse, qualify, recommend, and close
-- [ ] **Phase 4: Browser Voice UI** - Create a browser-based testing interface for Sarah without burning Twilio credits
-- [ ] **Phase 5: Cloud Run Deployment** - Deploy the voice agent to the internet so Twilio can reach it
-- [ ] **Phase 6: Twilio Integration** - Connect real phone calls with audio bridging, recording, and trial-aware conversation
-- [ ] **Phase 7: OpenClaw WhatsApp** - Set up WhatsApp outreach and free-text booking conversation via OpenClaw
-- [ ] **Phase 8: n8n Orchestration** - Wire all systems together with n8n workflows for the complete lead-to-outcome pipeline
-- [ ] **Phase 9: E2E Testing** - Validate the full pipeline with 10 real leads (Wave 0)
+- [x] **Phase 3: Voice Agent Backend** - Build Sarah (ADK agent with Gemini Live API) who can converse, qualify, recommend, and close
+- [ ] **Phase 4: Browser Voice UI** - React voice interface with real-time audio, interruption handling, and audio visualization for demo
+- [ ] **Phase 5: Cloud Run Deployment** - Terraform IaC deploying backend + frontend to Cloud Run with Artifact Registry, IAM, and Secret Manager
+- [ ] **Phase 6: Submission Prep** - README with spin-up instructions, architecture diagram, demo video recording, Devpost submission
+
+**POST-COMPETITION (full product launch):**
+- [ ] **Phase 7: Twilio Integration** - Connect real phone calls with audio bridging, recording, and trial-aware conversation
+- [ ] **Phase 8: OpenClaw WhatsApp** - Set up WhatsApp outreach and free-text booking conversation via OpenClaw
+- [ ] **Phase 9: n8n Orchestration** - Wire all systems together with n8n workflows for the complete lead-to-outcome pipeline
+- [ ] **Phase 10: E2E Testing** - Validate the full pipeline with 10 real leads (Wave 0)
 
 ## Phase Details
 
@@ -64,115 +68,109 @@ Plans:
   3. When a lead raises a price, time, or job outcome objection, Sarah responds with relevant information from the knowledge base PDFs rather than generic or hallucinated answers
   4. Sarah explicitly asks for commitment near the end of the call, and the system produces one of three outcomes (COMMITTED, FOLLOW_UP, DECLINED) validated against the full conversation context
   5. A duration watchdog triggers wrap-up behavior when the call approaches 8.5 minutes, and Sarah asks the lead when to follow up if the outcome is FOLLOW_UP
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans executed
 
 Plans:
-- [ ] 03-01-PLAN.md -- Knowledge loader, system instruction builder, ADK tools, and pytest test scaffold
-- [ ] 03-02-PLAN.md -- ADK Agent definition (Sarah) and call session manager with duration watchdog
-- [ ] 03-03-PLAN.md -- WebSocket voice handler with ADK Runner streaming and FastAPI route integration
+- [x] 03-01-PLAN.md -- Knowledge loader, system instruction builder, ADK tools, and pytest test scaffold
+- [x] 03-02-PLAN.md -- ADK Agent definition (Sarah) and call session manager with duration watchdog
+- [x] 03-03-PLAN.md -- WebSocket voice handler with ADK Runner streaming and FastAPI route integration
 
 ### Phase 4: Browser Voice UI
-**Goal**: Sarah can be tested through a web browser using microphone audio, validating conversation quality without any Twilio cost
+**Goal**: A polished React voice interface that demonstrates Sarah's real-time conversational ability with natural interruption handling, audio visualization, and connection status -- ready for the competition demo video
 **Depends on**: Phase 3
-**Requirements**: DEPL-03
+**Requirements**: DEPL-03, COMP-01, COMP-02
 **Success Criteria** (what must be TRUE):
   1. Opening the React app in a browser and clicking "Start Call" connects to Sarah via WebSocket and a two-way voice conversation begins using the browser microphone and speakers
-  2. The full qualification flow (greeting, questions, recommendation, objection handling, close) works identically in the browser as it does in backend unit tests
+  2. When the user speaks while Sarah is talking, Sarah stops immediately (barge-in) and the browser stops playing buffered audio -- no overlapping speech
+  3. The UI shows real-time connection status (connecting/connected/ended), call duration timer, and audio activity indicators for both user and agent
+  4. The full qualification flow (greeting, questions, recommendation, objection handling, close) works end-to-end through the browser
 **Plans**: TBD
 
 Plans:
 - [ ] 04-01: TBD
+- [ ] 04-02: TBD
 
 ### Phase 5: Cloud Run Deployment
-**Goal**: The voice agent is deployed on Cloud Run and accessible from the internet, ready for Twilio to connect to it
+**Goal**: Backend and frontend deployed to Cloud Run via Terraform infrastructure-as-code, providing the mandatory GCP deployment proof and IaC bonus for the competition
 **Depends on**: Phase 4
-**Requirements**: DEPL-01, DEPL-02, CALL-09
+**Requirements**: DEPL-01, DEPL-02, CALL-09, COMP-03, COMP-04
 **Success Criteria** (what must be TRUE):
-  1. The Cloud Run service responds to health check requests at /health with a 200 status code
-  2. Cold start time is measured and documented; if it exceeds 5 seconds, min-instances is set to 1
-  3. Two simultaneous WebSocket connections to the Cloud Run service both maintain independent conversations without interference (concurrent call support)
+  1. `terraform apply` provisions all resources: Artifact Registry, Cloud Run services (backend + frontend), IAM service accounts, and Secret Manager secrets
+  2. The Cloud Run backend responds to health check requests at /health with a 200 status code
+  3. The frontend is accessible via a public Cloud Run URL and connects to the backend WebSocket endpoint
+  4. Cold start time is measured and documented; if it exceeds 5 seconds, min-instances is set to 1
+  5. Two simultaneous WebSocket connections both maintain independent conversations (concurrent call support)
 **Plans**: TBD
 
 Plans:
 - [ ] 05-01: TBD
 - [ ] 05-02: TBD
 
-### Phase 6: Twilio Integration
-**Goal**: Sarah can make and receive real phone calls with clear audio, call recording, and proper handling of the Twilio trial message
+### Phase 6: Submission Prep
+**Goal**: All competition submission artifacts are ready -- README with spin-up instructions, architecture diagram, demo video, and Devpost submission text
 **Depends on**: Phase 5
-**Requirements**: INTG-01, CALL-07
+**Requirements**: COMP-05, COMP-06, COMP-07, COMP-08
 **Success Criteria** (what must be TRUE):
-  1. An outbound call initiated via Twilio connects to a verified test number, and bidirectional audio is clear (no static, silence, or garbled sound) with mulaw 8kHz to PCM 16kHz transcoding working correctly in both directions
-  2. After the call ends, the Twilio recording URL is stored in the Supabase call_logs table and the recording is playable
-  3. Sarah's opening accounts for the Twilio trial "this call is from a trial account" prefix so the conversation flows naturally despite it
+  1. README.md contains project description, tech stack, architecture diagram, local dev setup, Terraform deployment instructions, and competition context
+  2. Architecture diagram (PNG/SVG in docs/) clearly shows: Browser -> WebSocket -> FastAPI -> ADK/Runner -> Gemini Live API, plus Firestore and Supabase connections
+  3. Demo video (max 4 minutes) shows problem statement, live conversation with interruption, qualification flow, Cloud Run deployment proof, and architecture overview
+  4. Devpost submission text is drafted with features, technologies, and learnings
 **Plans**: TBD
 
 Plans:
 - [ ] 06-01: TBD
 - [ ] 06-02: TBD
 
-### Phase 7: OpenClaw WhatsApp
-**Goal**: Leads can receive WhatsApp outreach messages and book calls through natural free-text conversation, with rate limiting to avoid account bans
-**Depends on**: Phase 1 (parallelizable with Phases 3-6)
-**Requirements**: INTG-02, BOOK-01, OUTR-03, OUTR-04
+---
+
+**POST-COMPETITION PHASES (full product launch)**
+
+### Phase 7: Twilio Integration
+**Goal**: Sarah can make and receive real phone calls with clear audio, call recording, and proper handling of the Twilio trial message
+**Depends on**: Phase 5
+**Requirements**: INTG-01, CALL-07
 **Success Criteria** (what must be TRUE):
-  1. OpenClaw is connected to the personal Nigerian WhatsApp number and can send and receive messages
-  2. A test outreach message is delivered that includes a heads-up about the incoming call from a US number
-  3. A lead can reply with a preferred time in free text (e.g., "Tuesday at 3pm"), OpenClaw confirms the booking naturally, and the booking data is accessible to n8n
-  4. If a lead responds on both WhatsApp and email, the first response wins and the other channel receives an "already scheduled" message
-  5. Message sending is rate-limited to 10 messages per day with at least 30 seconds between messages
+  1. An outbound call initiated via Twilio connects to a verified test number, and bidirectional audio is clear with mulaw 8kHz to PCM 16kHz transcoding working correctly in both directions
+  2. After the call ends, the Twilio recording URL is stored in the Supabase call_logs table and the recording is playable
+  3. Sarah's opening accounts for the Twilio trial prefix so the conversation flows naturally
 **Plans**: TBD
 
 Plans:
 - [ ] 07-01: TBD
 - [ ] 07-02: TBD
 
-### Phase 8: n8n Orchestration
-**Goal**: The complete pipeline runs automatically -- new leads trigger outreach, bookings trigger reminders and calls, call outcomes trigger the correct follow-up, and admin stays informed
-**Depends on**: Phase 6, Phase 7
+### Phase 8: OpenClaw WhatsApp
+**Goal**: Leads can receive WhatsApp outreach messages and book calls through natural free-text conversation, with rate limiting to avoid account bans
+**Depends on**: Phase 1 (parallelizable)
+**Requirements**: INTG-02, BOOK-01, OUTR-03, OUTR-04
+**Plans**: TBD
+
+### Phase 9: n8n Orchestration
+**Goal**: The complete pipeline runs automatically -- new leads trigger outreach, bookings trigger calls, outcomes trigger follow-up
+**Depends on**: Phase 7, Phase 8
 **Requirements**: INTG-03, OUTR-01, OUTR-02, BOOK-02, BOOK-03, POST-01, POST-02, POST-03, POST-04, POST-05
-**Success Criteria** (what must be TRUE):
-  1. Adding a new lead to Supabase triggers both a WhatsApp outreach message (via OpenClaw) and a parallel email (via Resend API) without manual intervention
-  2. One hour before a scheduled call, the lead receives a WhatsApp reminder
-  3. If a lead does not answer, the system retries twice at different intervals and then sends a WhatsApp follow-up message
-  4. After a call with COMMITTED outcome, the lead receives a payment details email with bank transfer instructions; after FOLLOW_UP, a follow-up call is scheduled at the lead-specified time; after DECLINED, no further contact is made but the lead is preserved in the database
-  5. After every call, the admin receives a summary email with lead details, call outcome, duration, and recording URL; and committed leads who have not paid after 48 hours receive a payment reminder
 **Plans**: TBD
 
-Plans:
-- [ ] 08-01: TBD
-- [ ] 08-02: TBD
-- [ ] 08-03: TBD
-
-### Phase 9: E2E Testing
-**Goal**: The complete pipeline is validated with 10 real community members, proving that leads flow from import through outreach, booking, voice call, and post-call follow-up without manual intervention
-**Depends on**: Phase 8
-**Requirements**: None (validation phase -- verifies all requirements end-to-end)
-**Success Criteria** (what must be TRUE):
-  1. A self-test call to Akinwunmi's own phone completes the full pipeline: outreach received, call booked, Sarah calls and holds a natural conversation, outcome determined, correct post-call action triggered
-  2. At least 5 of the 10 test leads are processed through the pipeline with each stage logged in pipeline_logs and no leads stuck in limbo
-  3. All three outcome paths (COMMITTED, FOLLOW_UP, DECLINED) have been exercised at least once with correct downstream behavior (payment email, follow-up scheduling, or graceful close)
-  4. Total Twilio cost stays within the $0-15 budget constraint
+### Phase 10: E2E Testing
+**Goal**: Full pipeline validated with 10 real community members
+**Depends on**: Phase 9
+**Requirements**: None (validation phase)
 **Plans**: TBD
-
-Plans:
-- [ ] 09-01: TBD
-- [ ] 09-02: TBD
 
 ## Progress
 
-**Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9
-Note: Phase 7 (OpenClaw WhatsApp) can run in parallel with Phases 3-6.
+**Competition Critical Path:** 1 -> 2 -> 3 -> 4 -> 5 -> 6 (submit by 2026-03-16)
+**Post-Competition:** 7 -> 8 -> 9 -> 10
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Prerequisites | 2/2 | Complete | 2026-03-12 |
 | 2. Data Layer | 2/2 | Complete | 2026-03-12 |
-| 3. Voice Agent Backend | 2/3 | In Progress|  |
-| 4. Browser Voice UI | 0/1 | Not started | - |
-| 5. Cloud Run Deployment | 0/2 | Not started | - |
-| 6. Twilio Integration | 0/2 | Not started | - |
-| 7. OpenClaw WhatsApp | 0/2 | Not started | - |
-| 8. n8n Orchestration | 0/3 | Not started | - |
-| 9. E2E Testing | 0/2 | Not started | - |
+| 3. Voice Agent Backend | 3/3 | Complete | 2026-03-12 |
+| 4. Browser Voice UI | 0/2 | Not started | - |
+| 5. Cloud Run + Terraform | 0/2 | Not started | - |
+| 6. Submission Prep | 0/2 | Not started | - |
+| 7. Twilio Integration | 0/2 | Deferred | - |
+| 8. OpenClaw WhatsApp | 0/0 | Deferred | - |
+| 9. n8n Orchestration | 0/0 | Deferred | - |
+| 10. E2E Testing | 0/0 | Deferred | - |
