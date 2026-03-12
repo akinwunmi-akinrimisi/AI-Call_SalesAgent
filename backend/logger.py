@@ -5,7 +5,6 @@ This ensures full observability across the entire pipeline.
 """
 
 import os
-import json
 from datetime import datetime, timezone
 
 import httpx
@@ -34,7 +33,7 @@ async def log_event(
         "event_name": event_name,
         "message": message,
         "lead_id": lead_id,
-        "metadata": json.dumps(metadata) if metadata else None,
+        "metadata": metadata if metadata else None,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -47,6 +46,7 @@ async def log_event(
                     "apikey": SUPABASE_SERVICE_KEY,
                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                     "Content-Type": "application/json",
+                    "Content-Profile": "sales_agent",
                     "Prefer": "return=minimal",
                 },
                 timeout=10,

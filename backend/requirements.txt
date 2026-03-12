@@ -12,3 +12,4 @@ pymupdf4llm>=0.0.14
 resend>=2.0.0
 supabase>=2.0.0
 audioop-lts>=0.2.1
+phonenumbers>=8.13.0
