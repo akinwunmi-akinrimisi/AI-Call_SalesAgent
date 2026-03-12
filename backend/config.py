@@ -7,9 +7,10 @@ from dataclasses import dataclass
 @dataclass
 class Config:
     # Google Cloud
-    gcp_project_id: str = os.getenv("GCP_PROJECT_ID", "cloudboosta-agent")
-    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-live")
-    google_gemini_api_key: str = os.getenv("GOOGLE_GEMINI_API_KEY", "")
+    gcp_project_id: str = os.getenv("GCP_PROJECT_ID", "vision-gridai")
+    gcp_region: str = os.getenv("GCP_REGION", "europe-west1")
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-live-2.5-flash-native-audio")
+    google_application_credentials: str = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "secrets/openclaw-key-google.json")
 
     # Twilio
     twilio_account_sid: str = os.getenv("TWILIO_ACCOUNT_SID", "")
@@ -31,7 +32,7 @@ class Config:
         """Return list of missing required env vars."""
         required = {
             "GCP_PROJECT_ID": self.gcp_project_id,
-            "GOOGLE_GEMINI_API_KEY": self.google_gemini_api_key,
+            "GOOGLE_APPLICATION_CREDENTIALS": self.google_application_credentials,
             "TWILIO_ACCOUNT_SID": self.twilio_account_sid,
             "TWILIO_AUTH_TOKEN": self.twilio_auth_token,
             "TWILIO_PHONE_NUMBER": self.twilio_phone_number,

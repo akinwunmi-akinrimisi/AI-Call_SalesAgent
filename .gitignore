@@ -1,5 +1,6 @@
 # Credentials & secrets
 .env
+secrets/
 *.json
 !package.json
 !package-lock.json
@@ -34,7 +35,6 @@ Thumbs.db
 
 # Docker
 *.log
-
 # Knowledge base PDFs (tracked separately, not in git by default)
 # Uncomment if you want to track them:
 # !knowledge-base/*.pdf

@@ -81,7 +81,7 @@ GCP_PROJECT=$(gcloud config get-value project 2>/dev/null || echo "")
 if [ -n "$GCP_PROJECT" ]; then
     check_pass "GCP project set: $GCP_PROJECT"
 else
-    check_fail "No GCP project set. Run: gcloud config set project cloudboosta-agent"
+    check_fail "No GCP project set. Run: gcloud config set project vision-gridai"
 fi
 
 GCP_REGION=$(gcloud config get-value run/region 2>/dev/null || echo "")
@@ -158,7 +158,7 @@ done
 echo ""
 echo -e "${BLUE}[6/9] Knowledge Base Documents${NC}"
 
-for PDF in programmes.pdf faqs.pdf payment-details.pdf conversation-sequence.pdf coming-soon.pdf; do
+for PDF in programmes.pdf faqs.pdf payment-details.pdf conversation-sequence.pdf objection-handling.pdf; do
     if [ -f "knowledge-base/$PDF" ]; then
         check_pass "PDF exists: knowledge-base/$PDF"
     else
