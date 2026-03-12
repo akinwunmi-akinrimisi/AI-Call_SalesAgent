@@ -391,6 +391,142 @@ class TestHealthEndpoint:
         assert "missing_config" in data
 
 
+class TestTranscriptForwarding:
+    """Test that transcripts are forwarded as JSON on the WebSocket."""
+
+    def test_transcript_forwarding_user(
+        self, _mock_voice_deps, mock_lead, mock_session_service
+    ):
+        """When ADK emits input_transcription, voice handler sends JSON to WebSocket client."""
+        ss_cls, ss_instance, ss_mock = mock_session_service
+
+        # Create event with user transcription
+        event = MagicMock()
+        event.content = None
+        event.input_transcription = MagicMock(text="I am interested in cloud security.")
+        event.output_transcription = None
+
+        mock_runner_cls = MagicMock()
+        mock_runner_instance = MagicMock()
+
+        async def _event_gen(*args, **kwargs):
+            yield event
+
+        mock_runner_instance.run_live = _event_gen
+        mock_runner_cls.return_value = mock_runner_instance
+
+        with (
+            patch(
+                "voice_handler.fetch_lead",
+                new_callable=AsyncMock,
+                return_value=mock_lead,
+            ),
+            patch(
+                "voice_handler.load_knowledge_base",
+                new_callable=AsyncMock,
+                return_value="mock KB",
+            ),
+            patch(
+                "voice_handler.build_system_instruction",
+                return_value="mock instruction",
+            ),
+            patch(
+                "voice_handler.create_sarah_agent",
+                return_value=MagicMock(),
+            ),
+            patch("voice_handler.Runner", mock_runner_cls),
+            patch("voice_handler.InMemorySessionService", ss_cls),
+            patch(
+                "voice_handler.get_firestore_client",
+                return_value=MagicMock(),
+            ),
+            patch("voice_handler.log_event", new_callable=AsyncMock),
+            patch("voice_handler.process_call_end", new_callable=AsyncMock),
+            patch("voice_handler.LiveRequestQueue", MagicMock),
+            patch(
+                "voice_handler.duration_watchdog",
+                new_callable=AsyncMock,
+            ),
+        ):
+            from main import app
+
+            client = TestClient(app)
+            with client.websocket_connect("/ws/voice/lead-001") as ws:
+                ws.send_bytes(b"\x00" * 160)
+                # Receive the JSON transcript message
+                msg = ws.receive_json()
+                assert msg["type"] == "transcript"
+                assert msg["speaker"] == "user"
+                assert msg["text"] == "I am interested in cloud security."
+
+    def test_transcript_forwarding_agent(
+        self, _mock_voice_deps, mock_lead, mock_session_service
+    ):
+        """When ADK emits output_transcription, voice handler sends JSON to WebSocket client."""
+        ss_cls, ss_instance, ss_mock = mock_session_service
+
+        # Create event with agent transcription
+        event = MagicMock()
+        event.content = None
+        event.input_transcription = None
+        event.output_transcription = MagicMock(
+            text="That is a great choice! Let me tell you more."
+        )
+
+        mock_runner_cls = MagicMock()
+        mock_runner_instance = MagicMock()
+
+        async def _event_gen(*args, **kwargs):
+            yield event
+
+        mock_runner_instance.run_live = _event_gen
+        mock_runner_cls.return_value = mock_runner_instance
+
+        with (
+            patch(
+                "voice_handler.fetch_lead",
+                new_callable=AsyncMock,
+                return_value=mock_lead,
+            ),
+            patch(
+                "voice_handler.load_knowledge_base",
+                new_callable=AsyncMock,
+                return_value="mock KB",
+            ),
+            patch(
+                "voice_handler.build_system_instruction",
+                return_value="mock instruction",
+            ),
+            patch(
+                "voice_handler.create_sarah_agent",
+                return_value=MagicMock(),
+            ),
+            patch("voice_handler.Runner", mock_runner_cls),
+            patch("voice_handler.InMemorySessionService", ss_cls),
+            patch(
+                "voice_handler.get_firestore_client",
+                return_value=MagicMock(),
+            ),
+            patch("voice_handler.log_event", new_callable=AsyncMock),
+            patch("voice_handler.process_call_end", new_callable=AsyncMock),
+            patch("voice_handler.LiveRequestQueue", MagicMock),
+            patch(
+                "voice_handler.duration_watchdog",
+                new_callable=AsyncMock,
+            ),
+        ):
+            from main import app
+
+            client = TestClient(app)
+            with client.websocket_connect("/ws/voice/lead-001") as ws:
+                ws.send_bytes(b"\x00" * 160)
+                # Receive the JSON transcript message
+                msg = ws.receive_json()
+                assert msg["type"] == "transcript"
+                assert msg["speaker"] == "agent"
+                assert msg["text"] == "That is a great choice! Let me tell you more."
+
+
 class TestFetchLead:
     """Unit tests for the fetch_lead helper function."""
 
