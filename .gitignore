@@ -1,0 +1,39 @@
+# Credentials & secrets
+.env
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+dist/
+build/
+
+# GSD planning state
+.planning/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+
+# Knowledge base PDFs (tracked separately, not in git by default)
+# Uncomment if you want to track them:
+# !knowledge-base/*.pdf
