@@ -1,10 +1,12 @@
 """Shared test fixtures for Cloudboosta Voice Agent tests.
 
-Provides mock Firestore, Supabase, and ADK fixtures used across
-test_knowledge_loader.py, test_system_instruction.py, and test_tools.py.
+Provides mock Firestore, Supabase, ADK, and genai fixtures used across
+test_knowledge_loader.py, test_system_instruction.py, test_tools.py,
+test_agent.py, and test_call_manager.py.
 """
 
 import sys
+import types as builtin_types
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -12,6 +14,114 @@ import pytest
 
 # Add backend directory to sys.path so imports work without package install
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
+
+
+# ---- Mock google.adk and google.genai modules ----
+# These must be registered before any backend module that imports them at
+# module level (e.g., agent.py imports Agent from google.adk.agents).
+
+
+class _MockAgent:
+    """Lightweight mock of google.adk.agents.Agent that stores constructor args."""
+
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+
+class _MockContent:
+    """Lightweight mock of google.genai.types.Content."""
+
+    def __init__(self, *, role: str = "", parts: list | None = None):
+        self.role = role
+        self.parts = parts or []
+
+
+class _MockPart:
+    """Lightweight mock of google.genai.types.Part."""
+
+    def __init__(self, *, text: str = "", inline_data=None):
+        self.text = text
+        self.inline_data = inline_data
+
+
+def _setup_mock_google_modules():
+    """Register mock google.adk and google.genai module hierarchy in sys.modules."""
+    # Only install mocks if the real packages are not available
+    if "google.adk" in sys.modules or "google.genai" in sys.modules:
+        return
+
+    # google namespace package
+    google_mod = sys.modules.get("google")
+    if google_mod is None:
+        google_mod = builtin_types.ModuleType("google")
+        google_mod.__path__ = []
+        sys.modules["google"] = google_mod
+
+    # google.adk
+    if "google.adk" not in sys.modules:
+        adk_mod = builtin_types.ModuleType("google.adk")
+        adk_mod.__path__ = []
+        sys.modules["google.adk"] = adk_mod
+
+    # google.adk.agents
+    if "google.adk.agents" not in sys.modules:
+        agents_mod = builtin_types.ModuleType("google.adk.agents")
+        agents_mod.Agent = _MockAgent
+        sys.modules["google.adk.agents"] = agents_mod
+
+    # google.adk.runners
+    if "google.adk.runners" not in sys.modules:
+        runners_mod = builtin_types.ModuleType("google.adk.runners")
+        runners_mod.Runner = MagicMock
+        sys.modules["google.adk.runners"] = runners_mod
+
+    # google.adk.agents.run_config
+    if "google.adk.agents.run_config" not in sys.modules:
+        run_config_mod = builtin_types.ModuleType("google.adk.agents.run_config")
+        run_config_mod.RunConfig = MagicMock
+        run_config_mod.StreamingMode = MagicMock()
+        sys.modules["google.adk.agents.run_config"] = run_config_mod
+
+    # google.adk.agents.live_request_queue
+    if "google.adk.agents.live_request_queue" not in sys.modules:
+        lrq_mod = builtin_types.ModuleType("google.adk.agents.live_request_queue")
+        lrq_mod.LiveRequestQueue = MagicMock
+        sys.modules["google.adk.agents.live_request_queue"] = lrq_mod
+
+    # google.adk.sessions
+    if "google.adk.sessions" not in sys.modules:
+        sessions_mod = builtin_types.ModuleType("google.adk.sessions")
+        sessions_mod.InMemorySessionService = MagicMock
+        sys.modules["google.adk.sessions"] = sessions_mod
+
+    # google.adk.tools
+    if "google.adk.tools" not in sys.modules:
+        tools_mod = builtin_types.ModuleType("google.adk.tools")
+        tools_mod.ToolContext = MagicMock
+        sys.modules["google.adk.tools"] = tools_mod
+
+    # google.genai
+    if "google.genai" not in sys.modules:
+        genai_mod = builtin_types.ModuleType("google.genai")
+        genai_mod.__path__ = []
+        sys.modules["google.genai"] = genai_mod
+
+    # google.genai.types
+    if "google.genai.types" not in sys.modules:
+        genai_types_mod = builtin_types.ModuleType("google.genai.types")
+        genai_types_mod.Content = _MockContent
+        genai_types_mod.Part = _MockPart
+        genai_types_mod.Blob = MagicMock
+        genai_types_mod.SpeechConfig = MagicMock
+        genai_types_mod.VoiceConfig = MagicMock
+        genai_types_mod.PrebuiltVoiceConfig = MagicMock
+        genai_types_mod.AudioTranscriptionConfig = MagicMock
+        sys.modules["google.genai.types"] = genai_types_mod
+
+
+# Execute mock registration at import time (before any test module imports backend code)
+_setup_mock_google_modules()
 
 
 # ---- Firestore mock fixtures ----
