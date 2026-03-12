@@ -1,0 +1,4 @@
+name,phone,email
+Test Lead One,+2348012345678,test1@example.com
+Test Lead Two,+447986123456,test2@example.com
+Invalid Phone Lead,08012345678,test3@example.com
