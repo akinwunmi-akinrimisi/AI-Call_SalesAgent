@@ -52,7 +52,7 @@ Plans:
 
 Plans:
 - [ ] 02-01-PLAN.md -- Deploy Supabase sales_agent schema, update logger.py, implement CSV lead import
-- [ ] 02-02-PLAN.md -- Implement and execute Firestore knowledge base seeder from 5 PDFs
+- [x] 02-02-PLAN.md -- Implement and execute Firestore knowledge base seeder from 5 PDFs
 
 ### Phase 3: Voice Agent Backend
 **Goal**: Sarah can hold a complete qualification conversation -- greeting with AI disclosure, qualifying the lead, recommending a programme, handling objections, asking for commitment, and producing a clear outcome
@@ -168,7 +168,7 @@ Note: Phase 7 (OpenClaw WhatsApp) can run in parallel with Phases 3-6.
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Prerequisites | 2/2 | Complete | 2026-03-12 |
-| 2. Data Layer | 0/2 | Not started | - |
+| 2. Data Layer | 1/2 | In Progress | - |
 | 3. Voice Agent Backend | 0/3 | Not started | - |
 | 4. Browser Voice UI | 0/1 | Not started | - |
 | 5. Cloud Run Deployment | 0/2 | Not started | - |
