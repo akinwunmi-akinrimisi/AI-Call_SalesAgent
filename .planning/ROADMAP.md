@@ -64,12 +64,12 @@ Plans:
   3. When a lead raises a price, time, or job outcome objection, Sarah responds with relevant information from the knowledge base PDFs rather than generic or hallucinated answers
   4. Sarah explicitly asks for commitment near the end of the call, and the system produces one of three outcomes (COMMITTED, FOLLOW_UP, DECLINED) validated against the full conversation context
   5. A duration watchdog triggers wrap-up behavior when the call approaches 8.5 minutes, and Sarah asks the lead when to follow up if the outcome is FOLLOW_UP
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 03-01: TBD
-- [ ] 03-02: TBD
-- [ ] 03-03: TBD
+- [ ] 03-01-PLAN.md -- Knowledge loader, system instruction builder, ADK tools, and pytest test scaffold
+- [ ] 03-02-PLAN.md -- ADK Agent definition (Sarah) and call session manager with duration watchdog
+- [ ] 03-03-PLAN.md -- WebSocket voice handler with ADK Runner streaming and FastAPI route integration
 
 ### Phase 4: Browser Voice UI
 **Goal**: Sarah can be tested through a web browser using microphone audio, validating conversation quality without any Twilio cost
