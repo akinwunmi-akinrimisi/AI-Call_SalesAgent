@@ -17,15 +17,15 @@ Requirements for Wave 0 launch (10 test leads). Each maps to roadmap phases.
 ### Voice Call
 
 - [ ] **CALL-01**: Voice agent (Sarah) calls leads via Twilio from US number, powered by Gemini Live API with real-time audio streaming
-- [ ] **CALL-02**: Sarah discloses she is AI in the opening and mentions call recording
-- [ ] **CALL-03**: Sarah qualifies leads using conversation-sequence PDF decision tree (role, experience, cloud background, motivation)
-- [ ] **CALL-04**: Sarah recommends Cloud Security (£1,200) or SRE & Platform Engineering (£1,800) based on qualification
-- [ ] **CALL-05**: Sarah handles objections using knowledge base PDFs (price, time commitment, job outcomes, beginner concerns)
-- [ ] **CALL-06**: Call outcome determined by explicit commitment ask + Gemini validation against full conversation context (COMMITTED / FOLLOW_UP / DECLINED)
+- [x] **CALL-02**: Sarah discloses she is AI in the opening and mentions call recording
+- [x] **CALL-03**: Sarah qualifies leads using conversation-sequence PDF decision tree (role, experience, cloud background, motivation)
+- [x] **CALL-04**: Sarah recommends Cloud Security (£1,200) or SRE & Platform Engineering (£1,800) based on qualification
+- [x] **CALL-05**: Sarah handles objections using knowledge base PDFs (price, time commitment, job outcomes, beginner concerns)
+- [x] **CALL-06**: Call outcome determined by explicit commitment ask + Gemini validation against full conversation context (COMMITTED / FOLLOW_UP / DECLINED)
 - [ ] **CALL-07**: Call recorded via Twilio, recording URL stored in Supabase `call_logs`
 - [ ] **CALL-08**: Target call duration 5-10 minutes with duration watchdog triggering wrap-up at 8.5 minutes
 - [ ] **CALL-09**: Concurrent calls supported via multiple Cloud Run instances
-- [ ] **CALL-10**: Sarah asks the lead when to follow up (lead-determined follow-up timing)
+- [x] **CALL-10**: Sarah asks the lead when to follow up (lead-determined follow-up timing)
 
 ### Deployment
 
@@ -106,15 +106,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DATA-03 | Phase 2: Data Layer | Complete |
 | DATA-04 | Phase 2: Data Layer | Complete |
 | CALL-01 | Phase 3: Voice Agent Backend | Pending |
-| CALL-02 | Phase 3: Voice Agent Backend | Pending |
-| CALL-03 | Phase 3: Voice Agent Backend | Pending |
-| CALL-04 | Phase 3: Voice Agent Backend | Pending |
-| CALL-05 | Phase 3: Voice Agent Backend | Pending |
-| CALL-06 | Phase 3: Voice Agent Backend | Pending |
+| CALL-02 | Phase 3: Voice Agent Backend | Complete |
+| CALL-03 | Phase 3: Voice Agent Backend | Complete |
+| CALL-04 | Phase 3: Voice Agent Backend | Complete |
+| CALL-05 | Phase 3: Voice Agent Backend | Complete |
+| CALL-06 | Phase 3: Voice Agent Backend | Complete |
 | CALL-07 | Phase 6: Twilio Integration | Pending |
 | CALL-08 | Phase 3: Voice Agent Backend | Pending |
 | CALL-09 | Phase 5: Cloud Run Deployment | Pending |
-| CALL-10 | Phase 3: Voice Agent Backend | Pending |
+| CALL-10 | Phase 3: Voice Agent Backend | Complete |
 | DEPL-01 | Phase 5: Cloud Run Deployment | Pending |
 | DEPL-02 | Phase 5: Cloud Run Deployment | Pending |
 | DEPL-03 | Phase 4: Browser Voice UI | Pending |
