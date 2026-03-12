@@ -4,6 +4,8 @@
 !package.json
 !package-lock.json
 !tsconfig.json
+!.planning/**/*.json
+!.planning/config.json
 
 # Python
 __pycache__/
@@ -18,8 +20,7 @@ node_modules/
 dist/
 build/
 
-# GSD planning state
-.planning/
+# GSD planning state (tracked — commit_docs = true)
 
 # IDE
 .vscode/
