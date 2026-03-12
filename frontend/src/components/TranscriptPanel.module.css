@@ -1,0 +1,92 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #1e1e36;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.header {
+  padding: 16px;
+  font-size: 1rem;
+  color: #888;
+  border-bottom: 1px solid #2d2d44;
+  flex-shrink: 0;
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.messages::-webkit-scrollbar-thumb {
+  background: #3d3d5c;
+  border-radius: 3px;
+}
+
+.messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.bubbleGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agentGroup {
+  align-self: flex-start;
+}
+
+.userGroup {
+  align-self: flex-end;
+}
+
+.speakerLabel {
+  font-size: 0.75rem;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.userSpeakerLabel {
+  text-align: right;
+}
+
+.bubble {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  color: #e0e0e0;
+}
+
+.agentBubble {
+  align-self: flex-start;
+  background: rgba(0, 200, 83, 0.1);
+  border-left: 3px solid #00c853;
+}
+
+.userBubble {
+  align-self: flex-end;
+  background: rgba(74, 144, 217, 0.1);
+  border-right: 3px solid #4a90d9;
+}
+
+.emptyState {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #555;
+  font-size: 0.95rem;
+}

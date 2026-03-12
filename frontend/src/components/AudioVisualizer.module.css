@@ -1,0 +1,45 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.rings {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ring {
+  position: absolute;
+  border-radius: 50%;
+  transition: transform 0.1s ease-out;
+}
+
+.innerRing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: transform 0.1s ease-out;
+  z-index: 2;
+}
+
+.label {
+  color: #888;
+  font-size: 0.85rem;
+  margin-top: 4px;
+}
+
+.avatarText {
+  color: white;
+  font-weight: 600;
+}
+
+.micIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

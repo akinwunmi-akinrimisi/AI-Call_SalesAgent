@@ -1,0 +1,113 @@
+.screen {
+  display: grid;
+  grid-template-columns: 2fr 3fr;
+  height: 100vh;
+  gap: 0;
+}
+
+.leftPanel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 24px;
+  background: #1a1a2e;
+  border-right: 1px solid #2d2d44;
+}
+
+.rightPanel {
+  padding: 16px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.visualizers {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+}
+
+.statusBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: #e0e0e0;
+}
+
+.statusDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.statusConnected {
+  background: #00c853;
+}
+
+.statusConnecting {
+  background: #ffd600;
+  animation: pulse 1s infinite;
+}
+
+.timer {
+  font-size: 2rem;
+  font-weight: 300;
+  color: #e0e0e0;
+  font-variant-numeric: tabular-nums;
+}
+
+.endCallButton {
+  width: 160px;
+  height: 44px;
+  background: #ef5350;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.endCallButton:hover {
+  background: #f44336;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (max-width: 768px) {
+  .screen {
+    grid-template-columns: 1fr;
+  }
+
+  .leftPanel {
+    flex-direction: row;
+    padding: 16px;
+    border-right: none;
+    border-bottom: 1px solid #2d2d44;
+    gap: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .rightPanel {
+    height: auto;
+    flex: 1;
+  }
+
+  .visualizers {
+    flex-direction: row;
+    gap: 16px;
+  }
+}
