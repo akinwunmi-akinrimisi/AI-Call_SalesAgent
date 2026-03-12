@@ -13,7 +13,7 @@ This roadmap delivers an automated AI sales pipeline for Cloudboosta in 9 phases
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Prerequisites** - Validate all external dependencies (APIs, accounts, PDFs) before building anything
-- [ ] **Phase 2: Data Layer** - Deploy Supabase schema and Firestore knowledge base so every component has data to work with
+- [x] **Phase 2: Data Layer** - Deploy Supabase schema and Firestore knowledge base so every component has data to work with
 - [ ] **Phase 3: Voice Agent Backend** - Build Sarah (ADK agent with Gemini Live API) who can converse, qualify, recommend, and close
 - [ ] **Phase 4: Browser Voice UI** - Create a browser-based testing interface for Sarah without burning Twilio credits
 - [ ] **Phase 5: Cloud Run Deployment** - Deploy the voice agent to the internet so Twilio can reach it
@@ -51,7 +51,7 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md -- Deploy Supabase sales_agent schema, update logger.py, implement CSV lead import
+- [x] 02-01-PLAN.md -- Deploy Supabase sales_agent schema, update logger.py, implement CSV lead import
 - [x] 02-02-PLAN.md -- Implement and execute Firestore knowledge base seeder from 5 PDFs
 
 ### Phase 3: Voice Agent Backend
@@ -168,7 +168,7 @@ Note: Phase 7 (OpenClaw WhatsApp) can run in parallel with Phases 3-6.
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Prerequisites | 2/2 | Complete | 2026-03-12 |
-| 2. Data Layer | 1/2 | In Progress | - |
+| 2. Data Layer | 2/2 | Complete | 2026-03-12 |
 | 3. Voice Agent Backend | 0/3 | Not started | - |
 | 4. Browser Voice UI | 0/1 | Not started | - |
 | 5. Cloud Run Deployment | 0/2 | Not started | - |

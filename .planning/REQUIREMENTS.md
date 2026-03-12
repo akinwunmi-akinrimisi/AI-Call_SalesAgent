@@ -9,10 +9,10 @@ Requirements for Wave 0 launch (10 test leads). Each maps to roadmap phases.
 
 ### Data Foundation
 
-- [ ] **DATA-01**: Leads can be imported into Supabase via CSV with name, phone (with country code), and email
-- [ ] **DATA-02**: Supabase schema deployed in isolated `sales_agent` schema with leads, call_logs, and pipeline_logs tables
+- [x] **DATA-01**: Leads can be imported into Supabase via CSV with name, phone (with country code), and email
+- [x] **DATA-02**: Supabase schema deployed in isolated `sales_agent` schema with leads, call_logs, and pipeline_logs tables
 - [x] **DATA-03**: Firestore knowledge base seeded from 5 PDFs (programmes, conversation-sequence, FAQs, payment details, objection handling)
-- [ ] **DATA-04**: All significant pipeline actions logged to `pipeline_logs` table in Supabase
+- [x] **DATA-04**: All significant pipeline actions logged to `pipeline_logs` table in Supabase
 
 ### Voice Call
 
@@ -101,10 +101,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | Phase 2: Data Layer | Pending |
-| DATA-02 | Phase 2: Data Layer | Pending |
+| DATA-01 | Phase 2: Data Layer | Complete |
+| DATA-02 | Phase 2: Data Layer | Complete |
 | DATA-03 | Phase 2: Data Layer | Complete |
-| DATA-04 | Phase 2: Data Layer | Pending |
+| DATA-04 | Phase 2: Data Layer | Complete |
 | CALL-01 | Phase 3: Voice Agent Backend | Pending |
 | CALL-02 | Phase 3: Voice Agent Backend | Pending |
 | CALL-03 | Phase 3: Voice Agent Backend | Pending |
