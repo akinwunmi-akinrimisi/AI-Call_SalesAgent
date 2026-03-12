@@ -33,11 +33,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. All 10 Twilio test phone numbers are verified in the Twilio console and a test call connects to at least one
   3. All 5 PDF files (programmes, conversation-sequence, FAQs, payment details, objection handling) exist in knowledge-base/ and contain the expected content
   4. Environment variables for all services (Gemini, Twilio, Supabase, Firestore, Resend, OpenClaw) are documented in .env.example and populated in .env
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 01-01: TBD
-- [ ] 01-02: TBD
+- [ ] 01-01-PLAN.md -- Fix config files, secure secrets, copy PDFs, create PDF + service validation scripts
+- [ ] 01-02-PLAN.md -- Validate Gemini Live API audio round-trip and Twilio credentials + phone verification
 
 ### Phase 2: Data Layer
 **Goal**: Supabase schema and Firestore knowledge base are deployed and seeded so every downstream component can read/write data
@@ -167,7 +167,7 @@ Note: Phase 7 (OpenClaw WhatsApp) can run in parallel with Phases 3-6.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Prerequisites | 0/2 | Not started | - |
+| 1. Prerequisites | 0/2 | Planning complete | - |
 | 2. Data Layer | 0/2 | Not started | - |
 | 3. Voice Agent Backend | 0/3 | Not started | - |
 | 4. Browser Voice UI | 0/1 | Not started | - |
