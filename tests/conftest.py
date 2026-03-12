@@ -101,6 +101,18 @@ def _setup_mock_google_modules():
         tools_mod.ToolContext = MagicMock
         sys.modules["google.adk.tools"] = tools_mod
 
+    # google.cloud (namespace package for Firestore)
+    if "google.cloud" not in sys.modules:
+        cloud_mod = builtin_types.ModuleType("google.cloud")
+        cloud_mod.__path__ = []
+        sys.modules["google.cloud"] = cloud_mod
+
+    # google.cloud.firestore
+    if "google.cloud.firestore" not in sys.modules:
+        firestore_mod = builtin_types.ModuleType("google.cloud.firestore")
+        firestore_mod.AsyncClient = MagicMock
+        sys.modules["google.cloud.firestore"] = firestore_mod
+
     # google.genai
     if "google.genai" not in sys.modules:
         genai_mod = builtin_types.ModuleType("google.genai")
