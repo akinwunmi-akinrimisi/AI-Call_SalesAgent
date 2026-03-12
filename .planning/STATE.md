@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: completed
-stopped_at: Phase 4 context gathered
-last_updated: "2026-03-12T22:31:46.105Z"
-last_activity: 2026-03-12 -- Plan 03-03 complete (voice_handler.py + main.py WebSocket route + 9 integration tests)
+status: in_progress
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-03-12T23:26:45Z"
+last_activity: 2026-03-12 -- Plan 04-01 complete (transcript forwarding, REST endpoints, audio pipeline, barge-in tests)
 progress:
   total_phases: 10
   completed_phases: 3
-  total_plans: 7
-  completed_plans: 7
-  percent: 100
+  total_plans: 9
+  completed_plans: 8
+  percent: 89
 ---
 
 # Project State
@@ -21,23 +21,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-12)
 
 **Core value:** Sarah (the AI voice agent) must conduct a natural qualification call, recommend the right programme, handle objections, and produce a clear outcome (COMMITTED / FOLLOW_UP / DECLINED) -- the revenue moment.
-**Current focus:** Phase 3: Voice Agent Backend -- building Sarah's core modules.
+**Current focus:** Phase 4: Browser Voice UI -- building frontend audio infrastructure and React UI.
 
 ## Current Position
 
-Phase: 3 of 9 (Voice Agent Backend) -- COMPLETE
-Plan: 3 of 3 in current phase (03-03 complete -- phase done)
-Status: Phase 3 COMPLETE -- all 3 plans executed (knowledge_loader, agent+call_manager, voice_handler+main)
-Last activity: 2026-03-12 -- Plan 03-03 complete (voice_handler.py + main.py WebSocket route + 9 integration tests)
+Phase: 4 of 9 (Browser Voice UI)
+Plan: 1 of 2 in current phase (04-01 complete -- audio plumbing done)
+Status: Plan 04-01 complete. Plan 04-02 remaining (React visual components).
+Last activity: 2026-03-12 -- Plan 04-01 complete (transcript forwarding, REST endpoints, audio pipeline, barge-in tests)
 
-Progress: [██████████] 100%
+Progress: [████████░░] 89%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7
+- Total plans completed: 8
 - Average duration: 10min
-- Total execution time: 1.19 hours
+- Total execution time: 1.32 hours
 
 **By Phase:**
 
@@ -46,10 +46,11 @@ Progress: [██████████] 100%
 | 1. Prerequisites | 2/2 | 29min | 15min |
 | 2. Data Layer | 2/2 | 27min | 14min |
 | 3. Voice Agent Backend | 3/3 | 16min | 5min |
+| 4. Browser Voice UI | 1/2 | 8min | 8min |
 
 **Recent Trend:**
-- Last 5 plans: 02-02 (15min), 02-01 (12min), 03-01 (3min), 03-02 (5min), 03-03 (8min)
-- Trend: accelerating
+- Last 5 plans: 02-01 (12min), 03-01 (3min), 03-02 (5min), 03-03 (8min), 04-01 (8min)
+- Trend: stable
 
 *Updated after each plan completion*
 
@@ -85,6 +86,10 @@ Recent decisions affecting current work:
 - [03-03]: WebSocket close code 4004 for lead-not-found (custom application error code)
 - [03-03]: Tool state extraction via session_service.get_session reads ToolContext.state after streaming ends
 - [03-03]: google.cloud.firestore mock added to conftest.py for voice_handler import support
+- [04-01]: Extracted checkBargeIn as testable pure function from useVoiceSession hook for direct COMP-01 testing
+- [04-01]: VAD_THRESHOLD=0.015 RMS for barge-in detection, exported as named constant for tuning
+- [04-01]: Ring buffer 24000*180 (~3 min) in pcm-player-processor to avoid overflow during long responses
+- [04-01]: Vitest + jsdom for frontend testing (lighter than full browser, Vite-compatible)
 
 ### Pending Todos
 
@@ -101,6 +106,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-12T22:31:46.100Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-browser-voice-ui/04-CONTEXT.md
+Last session: 2026-03-12T23:26:45Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: .planning/phases/04-browser-voice-ui/04-01-SUMMARY.md

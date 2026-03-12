@@ -31,7 +31,7 @@ Requirements for Wave 0 launch (10 test leads). Each maps to roadmap phases.
 
 - [ ] **DEPL-01**: Voice agent deployed as Docker container on Cloud Run with health check endpoint
 - [ ] **DEPL-02**: Cold start time measured; min-instances=1 if >5 seconds
-- [ ] **DEPL-03**: Browser voice UI (React) for testing Sarah without Twilio credits
+- [x] **DEPL-03**: Browser voice UI (React) for testing Sarah without Twilio credits
 
 ### Outreach
 
@@ -62,7 +62,7 @@ Requirements for Wave 0 launch (10 test leads). Each maps to roadmap phases.
 
 ### Competition (Gemini Live Agent Challenge -- deadline 2026-03-16)
 
-- [ ] **COMP-01**: Natural interruption handling -- user can speak while Sarah is talking and Sarah stops immediately (barge-in), browser stops playing buffered audio
+- [x] **COMP-01**: Natural interruption handling -- user can speak while Sarah is talking and Sarah stops immediately (barge-in), browser stops playing buffered audio
 - [ ] **COMP-02**: Audio activity visualization in browser UI showing when user and agent are speaking
 - [ ] **COMP-03**: Terraform infrastructure-as-code deploys all GCP resources (Cloud Run, Artifact Registry, IAM, Secret Manager) with `terraform apply`
 - [ ] **COMP-04**: Cloud deployment proof -- working Cloud Run URL accessible from the internet
@@ -128,8 +128,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CALL-10 | Phase 3: Voice Agent Backend | Complete |
 | DEPL-01 | Phase 5: Cloud Run Deployment | Pending |
 | DEPL-02 | Phase 5: Cloud Run Deployment | Pending |
-| DEPL-03 | Phase 4: Browser Voice UI | Pending |
-| COMP-01 | Phase 4: Browser Voice UI | Pending |
+| DEPL-03 | Phase 4: Browser Voice UI | Complete |
+| COMP-01 | Phase 4: Browser Voice UI | Complete |
 | COMP-02 | Phase 4: Browser Voice UI | Pending |
 | COMP-03 | Phase 5: Cloud Run Deployment | Pending |
 | COMP-04 | Phase 5: Cloud Run Deployment | Pending |
