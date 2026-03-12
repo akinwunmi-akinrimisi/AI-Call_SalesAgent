@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in-progress
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-03-12T21:24:20Z"
-last_activity: 2026-03-12 -- Plan 03-01 complete (knowledge_loader.py + tools.py + 23 tests)
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-03-12T21:33:32Z"
+last_activity: 2026-03-12 -- Plan 03-02 complete (agent.py + call_manager.py + 20 tests)
 progress:
   total_phases: 9
   completed_phases: 2
   total_plans: 7
-  completed_plans: 5
-  percent: 71
+  completed_plans: 6
+  percent: 86
 ---
 
 # Project State
@@ -26,18 +26,18 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 ## Current Position
 
 Phase: 3 of 9 (Voice Agent Backend)
-Plan: 1 of 3 in current phase (03-01 complete)
-Status: Phase 3 in progress -- foundation modules done, agent definition and voice handler next
-Last activity: 2026-03-12 -- Plan 03-01 complete (knowledge_loader.py + tools.py + 23 tests)
+Plan: 2 of 3 in current phase (03-02 complete)
+Status: Phase 3 in progress -- agent definition and call manager done, voice handler (WebSocket) next
+Last activity: 2026-03-12 -- Plan 03-02 complete (agent.py + call_manager.py + 20 tests)
 
-Progress: [███████░░░] 71%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
-- Average duration: 12min
-- Total execution time: 0.98 hours
+- Total plans completed: 6
+- Average duration: 11min
+- Total execution time: 1.06 hours
 
 **By Phase:**
 
@@ -45,10 +45,10 @@ Progress: [███████░░░] 71%
 |-------|-------|-------|----------|
 | 1. Prerequisites | 2/2 | 29min | 15min |
 | 2. Data Layer | 2/2 | 27min | 14min |
-| 3. Voice Agent Backend | 1/3 | 3min | 3min |
+| 3. Voice Agent Backend | 2/3 | 8min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 01-02 (20min), 02-02 (15min), 02-01 (12min), 03-01 (3min)
+- Last 5 plans: 01-02 (20min), 02-02 (15min), 02-01 (12min), 03-01 (3min), 03-02 (5min)
 - Trend: accelerating
 
 *Updated after each plan completion*
@@ -78,6 +78,9 @@ Recent decisions affecting current work:
 - [03-01]: AsyncMock return_value for Firestore mock chain -- side_effect with async lambda creates double-coroutine
 - [03-01]: ADK tools store state in ToolContext.state dict, Supabase writes deferred to call cleanup for non-blocking
 - [03-01]: SUPABASE_URL/KEY read from env at module level in tools.py, matching logger.py pattern
+- [03-02]: Mock google.adk/genai via sys.modules in conftest.py -- avoids heavy ADK install for unit tests
+- [03-02]: CallSession stores qualification and outcome as separate dicts, written to Supabase independently in process_call_end
+- [03-02]: duration_watchdog uses asyncio.sleep with CancelledError for clean cancellation
 
 ### Pending Todos
 
@@ -94,6 +97,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-12T21:24:20Z
-Stopped at: Completed 03-01-PLAN.md
-Resume file: .planning/phases/03-voice-agent-backend/03-01-SUMMARY.md
+Last session: 2026-03-12T21:33:32Z
+Stopped at: Completed 03-02-PLAN.md
+Resume file: .planning/phases/03-voice-agent-backend/03-02-SUMMARY.md
