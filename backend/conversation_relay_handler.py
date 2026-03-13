@@ -27,8 +27,6 @@ import time
 from fastapi import WebSocket, WebSocketDisconnect
 from google import genai
 from google.genai import types
-from twilio.twiml.voice_response import VoiceResponse, Connect
-
 from call_manager import CallSession, process_call_end
 from config import config
 from knowledge_loader import build_system_instruction, load_knowledge_base
@@ -157,34 +155,23 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
         await _send_json(websocket, {"type": "end"})
         return
 
-    # ---- Gemini Live session ----
+    # ---- Gemini Live session (TEXT only) ----
     client = genai.Client(api_key=api_key)
-    model_name = config.gemini_model
-    is_native_audio = "native-audio" in model_name
 
-    # Native-audio models require AUDIO modality — we extract text from
-    # output_transcription. Other models use TEXT modality directly.
-    live_config_kwargs = dict(
+    # ConversationRelay needs TEXT modality (Twilio handles TTS).
+    # Use CR_GEMINI_MODEL env var, or fall back to gemini-2.0-flash-live-001
+    # which supports TEXT output on the Live API. Native-audio models don't
+    # reliably produce output_transcription after the first turn.
+    model_name = os.getenv("CR_GEMINI_MODEL", "gemini-2.0-flash-live-001")
+
+    live_config = types.LiveConnectConfig(
+        response_modalities=["TEXT"],
         system_instruction=types.Content(
             parts=[types.Part(text=system_instruction)]
         ),
         tools=TOOL_DECLARATIONS,
     )
-
-    if is_native_audio:
-        live_config_kwargs["response_modalities"] = ["AUDIO"]
-        live_config_kwargs["speech_config"] = types.SpeechConfig(
-            voice_config=types.VoiceConfig(
-                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Kore")
-            ),
-        )
-        live_config_kwargs["output_audio_transcription"] = types.AudioTranscriptionConfig()
-        live_config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
-    else:
-        live_config_kwargs["response_modalities"] = ["TEXT"]
-
-    live_config = types.LiveConnectConfig(**live_config_kwargs)
-    logger.info("CR: model=%s native_audio=%s", model_name, is_native_audio)
+    logger.info("CR: model=%s (text-only mode)", model_name)
 
     # ---- Call session ----
     call_session = CallSession(lead_id=lead_id, lead_name=lead_name)
@@ -271,13 +258,7 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
                     call_ended.set()
 
             async def receive_from_gemini():
-                """Receive Gemini responses and send text back to ConversationRelay.
-
-                Handles two modes:
-                - TEXT modality: text arrives in model_turn.parts[].text
-                - AUDIO modality (native-audio): text arrives in output_transcription
-                  (audio data is discarded since ConversationRelay handles TTS)
-                """
+                """Receive Gemini text responses and send to ConversationRelay."""
                 try:
                     async for msg in session.receive():
                         if call_ended.is_set():
@@ -302,11 +283,10 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
                                 function_responses=responses
                             )
 
-                        # ---- SERVER CONTENT ----
+                        # ---- TEXT RESPONSES ----
                         if msg.server_content:
                             sc = msg.server_content
 
-                            # TEXT mode: text in model_turn parts
                             if sc.model_turn and sc.model_turn.parts:
                                 for part in sc.model_turn.parts:
                                     if hasattr(part, "text") and part.text:
@@ -319,23 +299,6 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
                                             "token": text,
                                             "last": False,
                                         })
-                                    # AUDIO mode: discard audio data (CR handles TTS)
-
-                            # AUDIO mode: extract text from output_transcription
-                            if (
-                                hasattr(sc, "output_transcription")
-                                and sc.output_transcription
-                                and sc.output_transcription.text
-                            ):
-                                text = sc.output_transcription.text
-                                logger.info("CR <<< Sarah (tx): %s", text[:120])
-                                call_session.append_agent_transcript(text)
-
-                                await _send_json(websocket, {
-                                    "type": "text",
-                                    "token": text,
-                                    "last": False,
-                                })
 
                             # Turn complete — mark last token
                             if hasattr(sc, "turn_complete") and sc.turn_complete:
