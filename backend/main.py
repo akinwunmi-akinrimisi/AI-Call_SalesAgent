@@ -4,13 +4,14 @@ import logging
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from config import config
 from voice_handler import handle_voice_session
+import twilio_handler
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,134 @@ async def get_latest_call(lead_id: str):
         )
 
 
-# TODO: Phase 7 — Twilio webhook routes
+# ---- Twilio Integration ----
+
+
+@app.post("/api/call/initiate")
+async def initiate_call(request: Request):
+    """Trigger an outbound Twilio call to a lead."""
+    body = await request.json()
+    lead_id = body.get("lead_id")
+    phone = body.get("phone")
+
+    if not lead_id or not phone:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "lead_id and phone are required"},
+        )
+
+    if not config.twilio_account_sid or not config.twilio_auth_token:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Twilio not configured"},
+        )
+
+    base_url = str(request.base_url).rstrip("/")
+
+    try:
+        result = await twilio_handler.initiate_call(lead_id, phone, base_url)
+        return result
+    except Exception as exc:
+        logger.error("Failed to initiate call for %s: %s", lead_id, exc)
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Failed to initiate call: {exc}"},
+        )
+
+
+@app.post("/twilio/voice")
+async def twilio_voice(request: Request):
+    """TwiML webhook — returns Media Streams connection instructions."""
+    lead_id = request.query_params.get("lead_id", "")
+    base_url = str(request.base_url).rstrip("/")
+    twiml = twilio_handler.generate_twiml(lead_id, base_url)
+    return Response(content=twiml, media_type="application/xml")
+
+
+@app.websocket("/ws/twilio/stream")
+async def twilio_stream(websocket: WebSocket):
+    """Twilio Media Streams WebSocket — bridges phone audio with Gemini."""
+    await twilio_handler.handle_twilio_stream(websocket)
+
+
+@app.post("/twilio/recording")
+async def twilio_recording(request: Request):
+    """Twilio recording status callback — stores recording URL."""
+    form = await request.form()
+    lead_id = request.query_params.get("lead_id", "")
+    recording_url = form.get("RecordingUrl", "")
+    recording_sid = form.get("RecordingSid", "")
+
+    if recording_url and lead_id:
+        # Update the latest call_log with the recording URL
+        url = (
+            f"{config.supabase_url}/rest/v1/call_logs"
+            f"?lead_id=eq.{lead_id}&order=created_at.desc&limit=1"
+        )
+        headers = {
+            "apikey": config.supabase_service_key,
+            "Authorization": f"Bearer {config.supabase_service_key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                # Get the latest call log
+                resp = await client.get(
+                    url,
+                    headers={
+                        "apikey": config.supabase_service_key,
+                        "Authorization": f"Bearer {config.supabase_service_key}",
+                        "Accept": "application/json",
+                    },
+                    timeout=10,
+                )
+                data = resp.json()
+                if data:
+                    call_log_id = data[0]["id"]
+                    patch_url = (
+                        f"{config.supabase_url}/rest/v1/call_logs"
+                        f"?id=eq.{call_log_id}"
+                    )
+                    await client.patch(
+                        patch_url,
+                        json={"recording_url": f"{recording_url}.mp3"},
+                        headers=headers,
+                        timeout=10,
+                    )
+                    logger.info(
+                        "Recording URL saved for lead %s: %s",
+                        lead_id, recording_url,
+                    )
+        except Exception as exc:
+            logger.error("Failed to save recording URL: %s", exc)
+
+    return {"status": "ok"}
+
+
+@app.post("/twilio/status")
+async def twilio_status(request: Request):
+    """Twilio call status callback — logs call completion/failure."""
+    form = await request.form()
+    lead_id = request.query_params.get("lead_id", "")
+    call_status = form.get("CallStatus", "")
+    call_duration = form.get("CallDuration", "0")
+    call_sid = form.get("CallSid", "")
+
+    from logger import log_event as _log
+
+    await _log(
+        "twilio_status",
+        f"Twilio call {call_sid} status: {call_status} (duration={call_duration}s)",
+        lead_id=lead_id if lead_id else None,
+        metadata={
+            "call_sid": call_sid,
+            "call_status": call_status,
+            "call_duration": call_duration,
+        },
+    )
+
+    return {"status": "ok"}
 
 # --- Serve frontend static files (production) ---
 _static_dir = Path(__file__).parent / "static"
