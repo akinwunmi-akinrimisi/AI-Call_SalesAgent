@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import config
 from voice_handler import handle_voice_session
+from minimal_test import handle_minimal_test, handle_minimal_twilio
 import twilio_handler
 
 logger = logging.getLogger(__name__)
@@ -122,6 +123,44 @@ async def debug_audio():
             filename="debug_inbound.raw",
         )
     return JSONResponse(status_code=404, content={"error": "No debug audio file"})
+
+
+# ---- Minimal Test Endpoints (VAD debugging) ----
+
+
+@app.websocket("/ws/test/minimal")
+async def test_minimal(websocket: WebSocket):
+    """Minimal browser test — bare Gemini Live, no tools/KB.
+    Query params: ?model=gemini-2.0-flash-live-001 to override model.
+    """
+    model = websocket.query_params.get("model", "")
+    await handle_minimal_test(websocket, model_override=model)
+
+
+@app.websocket("/ws/test/minimal-twilio")
+async def test_minimal_twilio(websocket: WebSocket):
+    """Minimal Twilio test — bare Gemini Live over Twilio audio."""
+    model = websocket.query_params.get("model", "")
+    await handle_minimal_twilio(websocket, model_override=model)
+
+
+@app.api_route("/twilio/test-minimal", methods=["GET", "POST"])
+async def twilio_test_minimal_voice(request: Request):
+    """TwiML for minimal Twilio test — single bidirectional stream."""
+    base_url = str(request.base_url).rstrip("/").replace("http://", "https://")
+    ws_url = base_url.replace("https://", "wss://")
+    model = request.query_params.get("model", "")
+    model_param = f"?model={model}" if model else ""
+
+    response = twilio_handler.VoiceResponse()
+    connect = twilio_handler.Connect()
+    stream = twilio_handler.Stream(url=f"{ws_url}/ws/test/minimal-twilio{model_param}")
+    connect.append(stream)
+    response.append(connect)
+
+    twiml = str(response)
+    logger.info("Minimal test TwiML: %s", twiml)
+    return Response(content=twiml, media_type="application/xml")
 
 
 # ---- Twilio Integration ----
