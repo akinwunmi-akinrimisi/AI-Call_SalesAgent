@@ -65,14 +65,16 @@ def generate_conversation_relay_twiml(lead_id: str, base_url: str) -> str:
     """Generate TwiML XML with <ConversationRelay> noun."""
     ws_url = base_url.replace("https://", "wss://").replace("http://", "ws://")
 
-    # Voice: en-US-Studio-O is Google's most natural female voice
-    # (Studio voices are premium conversational voices)
+    # Voice: en-US-Neural2-F (proven working with ConversationRelay)
+    # Note: Studio-O and Journey-F cause Twilio application errors.
+    # Naturalness is achieved via system instruction (short sentences,
+    # contractions, filler words, varied pacing) rather than voice model.
     twiml = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<Response>"
         "<Connect>"
         f'<ConversationRelay url="{ws_url}/ws/conversation-relay" '
-        f'voice="en-US-Studio-O" '
+        f'voice="en-US-Neural2-F" '
         f'language="en-US" '
         f'ttsProvider="google" '
         f'transcriptionProvider="google" '
