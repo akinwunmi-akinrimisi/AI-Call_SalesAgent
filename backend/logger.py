@@ -9,8 +9,10 @@ from datetime import datetime, timezone
 
 import httpx
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+from config import config
+
+SUPABASE_URL = config.supabase_url
+SUPABASE_SERVICE_KEY = config.supabase_service_key
 
 
 async def log_event(
@@ -46,7 +48,6 @@ async def log_event(
                     "apikey": SUPABASE_SERVICE_KEY,
                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                     "Content-Type": "application/json",
-                    "Content-Profile": "sales_agent",
                     "Prefer": "return=minimal",
                 },
                 timeout=10,

@@ -23,10 +23,12 @@ if TYPE_CHECKING:
     from google.adk.tools import ToolContext
 
 
-# ---- Configuration (from environment, same pattern as logger.py) ----
+# ---- Configuration (from config which loads .env via dotenv) ----
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+from config import config
+
+SUPABASE_URL = config.supabase_url
+SUPABASE_SERVICE_KEY = config.supabase_service_key
 
 VALID_OUTCOMES = ("COMMITTED", "FOLLOW_UP", "DECLINED")
 
@@ -122,7 +124,6 @@ async def write_lead_profile_to_supabase(lead_id: str, profile: dict) -> None:
         "apikey": SUPABASE_SERVICE_KEY,
         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
         "Content-Type": "application/json",
-        "Content-Profile": "sales_agent",
         "Prefer": "return=minimal",
     }
     async with httpx.AsyncClient() as client:
@@ -150,7 +151,6 @@ async def write_call_log_to_supabase(lead_id: str, call_data: dict) -> str:
         "apikey": SUPABASE_SERVICE_KEY,
         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
         "Content-Type": "application/json",
-        "Content-Profile": "sales_agent",
         "Prefer": "return=representation",
     }
     async with httpx.AsyncClient() as client:

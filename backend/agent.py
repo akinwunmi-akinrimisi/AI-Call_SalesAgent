@@ -33,7 +33,7 @@ def create_sarah_agent(system_instruction: str) -> Agent:
     """
     return Agent(
         name="Sarah",
-        model="gemini-live-2.5-flash-native-audio",
+        model="gemini-2.5-flash-native-audio-latest",
         description="Cloudboosta AI sales agent for qualification calls",
         instruction=system_instruction,
         tools=[

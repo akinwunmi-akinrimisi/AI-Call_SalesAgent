@@ -2,6 +2,13 @@
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load .env from project root (one level up from backend/)
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(_env_path)
 
 
 @dataclass
@@ -9,8 +16,21 @@ class Config:
     # Google Cloud
     gcp_project_id: str = os.getenv("GCP_PROJECT_ID", "vision-gridai")
     gcp_region: str = os.getenv("GCP_REGION", "europe-west1")
-    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-live-2.5-flash-native-audio")
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-live-001")
     google_application_credentials: str = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "secrets/openclaw-key-google.json")
+
+    def __post_init__(self):
+        """Resolve credentials path relative to project root."""
+        import os
+        from pathlib import Path
+        cred_path = Path(self.google_application_credentials)
+        if not cred_path.is_absolute() and not cred_path.exists():
+            # Try relative to project root (one level up from backend/)
+            project_root = Path(__file__).resolve().parent.parent
+            resolved = project_root / cred_path
+            if resolved.exists():
+                self.google_application_credentials = str(resolved)
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(resolved)
 
     # Twilio
     twilio_account_sid: str = os.getenv("TWILIO_ACCOUNT_SID", "")

@@ -54,7 +54,6 @@ async def list_leads():
         "apikey": config.supabase_service_key,
         "Authorization": f"Bearer {config.supabase_service_key}",
         "Accept": "application/json",
-        "Accept-Profile": "sales_agent",
     }
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -80,7 +79,6 @@ async def get_latest_call(lead_id: str):
         "apikey": config.supabase_service_key,
         "Authorization": f"Bearer {config.supabase_service_key}",
         "Accept": "application/json",
-        "Accept-Profile": "sales_agent",
     }
     try:
         async with httpx.AsyncClient(timeout=10) as client:

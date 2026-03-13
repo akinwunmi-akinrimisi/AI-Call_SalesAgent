@@ -30,27 +30,15 @@ export default function App() {
     endCall,
   } = useVoiceSession();
 
-  // Track previous status to detect "connected" -> "ended" transition
+  // Track previous status to detect transition to "ended"
   const prevStatusRef = useRef(status);
 
   useEffect(() => {
     const prevStatus = prevStatusRef.current;
     prevStatusRef.current = status;
 
-    if (prevStatus === "connected" && status === "ended" && selectedLead) {
-      // Call just ended -- fetch summary
-      const fetchSummary = async () => {
-        try {
-          const res = await fetch(`/api/call/${selectedLead.id}/latest`);
-          if (res.ok) {
-            const data = await res.json();
-            setCallSummary(data);
-          }
-        } catch (err) {
-          console.error("Failed to fetch call summary:", err);
-        }
-      };
-
+    // Transition to post-call when status becomes "ended" from any active state
+    if (status === "ended" && prevStatus !== "ended" && screen === "active") {
       // Compute call duration
       if (callStartTime) {
         const durationSeconds = Math.floor(
@@ -59,10 +47,17 @@ export default function App() {
         setCallDuration(durationSeconds);
       }
 
-      fetchSummary();
+      // Fetch summary if we had a lead selected
+      if (selectedLead) {
+        fetch(`/api/call/${selectedLead.id}/latest`)
+          .then((res) => res.ok ? res.json() : null)
+          .then((data) => { if (data) setCallSummary(data); })
+          .catch((err) => console.error("Failed to fetch call summary:", err));
+      }
+
       setScreen("post-call");
     }
-  }, [status, selectedLead, callStartTime]);
+  }, [status, selectedLead, callStartTime, screen]);
 
   const handleStartCall = async () => {
     if (!selectedLead) return;
@@ -94,7 +89,20 @@ export default function App() {
           userAmplitude={userAmplitude}
           sarahAmplitude={sarahAmplitude}
           callStartTime={callStartTime}
-          onEndCall={endCall}
+          onEndCall={() => {
+            endCall();
+            // Compute duration before transitioning
+            if (callStartTime) {
+              setCallDuration(Math.floor((Date.now() - callStartTime.getTime()) / 1000));
+            }
+            if (selectedLead) {
+              fetch(`/api/call/${selectedLead.id}/latest`)
+                .then((res) => res.ok ? res.json() : null)
+                .then((data) => { if (data) setCallSummary(data); })
+                .catch(() => {});
+            }
+            setScreen("post-call");
+          }}
         />
       )}
 

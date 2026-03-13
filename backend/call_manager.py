@@ -135,12 +135,12 @@ async def _update_lead_status(lead_id: str, status: str) -> None:
         lead_id: UUID of the lead to update.
         status: New status value (e.g., 'call_completed', 'call_dropped').
     """
-    import os
-
     import httpx
 
-    supabase_url = os.getenv("SUPABASE_URL", "")
-    supabase_key = os.getenv("SUPABASE_SERVICE_KEY", "")
+    from config import config as _cfg
+
+    supabase_url = _cfg.supabase_url
+    supabase_key = _cfg.supabase_service_key
 
     if not supabase_url or not supabase_key:
         return
@@ -150,7 +150,6 @@ async def _update_lead_status(lead_id: str, status: str) -> None:
         "apikey": supabase_key,
         "Authorization": f"Bearer {supabase_key}",
         "Content-Type": "application/json",
-        "Content-Profile": "sales_agent",
         "Prefer": "return=minimal",
     }
     async with httpx.AsyncClient() as client:

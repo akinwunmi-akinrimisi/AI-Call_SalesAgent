@@ -5,6 +5,9 @@ complete system instruction including persona, AI disclosure, qualification
 flow, programme recommendations, objection handling rules, commitment
 thresholds, watchdog behavior, and the full knowledge base content.
 
+KB content is cached in-memory with a 5-minute TTL so that consecutive
+calls don't re-fetch 42K chars from Firestore every time.
+
 Exports:
     load_knowledge_base: Fetch and concatenate all KB documents from Firestore.
     build_system_instruction: Build the complete system instruction for Sarah.
@@ -12,10 +15,15 @@ Exports:
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from google.cloud import firestore
+
+logger = logging.getLogger(__name__)
 
 KB_DOCS = [
     "programmes",
@@ -25,14 +33,17 @@ KB_DOCS = [
     "objection-handling",
 ]
 
+# Module-level KB cache
+_kb_cache: str | None = None
+_kb_cache_time: float = 0.0
+_KB_CACHE_TTL = 300.0  # 5 minutes
+
 
 async def load_knowledge_base(db: "firestore.AsyncClient") -> str:
     """Fetch all KB docs from Firestore and return concatenated content.
 
-    Loads each document from the knowledge_base collection. If a document
-    is missing, it is silently skipped -- the remaining documents are still
-    returned. This allows partial KB loading if a document is temporarily
-    unavailable.
+    Uses a 5-minute in-memory cache to avoid re-fetching on every call.
+    Reads all 5 documents in parallel via asyncio.gather for speed.
 
     Args:
         db: Firestore AsyncClient instance.
@@ -40,13 +51,34 @@ async def load_knowledge_base(db: "firestore.AsyncClient") -> str:
     Returns:
         Concatenated KB content with section headers and separators.
     """
+    global _kb_cache, _kb_cache_time
+
+    # Return cached content if fresh
+    if _kb_cache is not None and (time.time() - _kb_cache_time) < _KB_CACHE_TTL:
+        logger.info("KB cache hit (%d chars, age %.0fs)", len(_kb_cache), time.time() - _kb_cache_time)
+        return _kb_cache
+
+    # Fetch all documents in parallel
+    tasks = [
+        db.collection("knowledge_base").document(doc_id).get()
+        for doc_id in KB_DOCS
+    ]
+    docs = await asyncio.gather(*tasks)
+
     sections = []
-    for doc_id in KB_DOCS:
-        doc = await db.collection("knowledge_base").document(doc_id).get()
+    for doc_id, doc in zip(KB_DOCS, docs):
         if doc.exists:
             content = doc.to_dict().get("content", "")
             sections.append(f"## {doc_id.replace('-', ' ').title()}\n\n{content}")
-    return "\n\n---\n\n".join(sections)
+
+    result = "\n\n---\n\n".join(sections)
+
+    # Update cache
+    _kb_cache = result
+    _kb_cache_time = time.time()
+    logger.info("KB loaded from Firestore (%d chars, %d docs)", len(result), len(sections))
+
+    return result
 
 
 def build_system_instruction(lead_name: str, kb_content: str) -> str:

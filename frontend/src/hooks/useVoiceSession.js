@@ -4,39 +4,36 @@
  * Manages the full bidirectional audio pipeline between the browser
  * microphone and the Sarah voice agent backend over WebSocket.
  *
+ * Audio playback uses Google's AudioStreamer pattern (scheduled
+ * AudioBufferSourceNodes) — ported from their official reference:
+ * https://github.com/google-gemini/multimodal-live-api-web-console
+ *
  * Features:
  * - 16kHz mic capture via AudioWorklet (pcm-recorder-processor)
- * - 24kHz playback via AudioWorklet ring buffer (pcm-player-processor)
- * - Barge-in detection: flushes playback buffer when user speaks over Sarah
+ * - 24kHz playback via AudioStreamer (scheduled buffers, gapless)
+ * - Barge-in detection: stops scheduled playback when user speaks
  * - Amplitude tracking for visualization (user + Sarah)
  * - Transcript accumulation from server JSON messages
  */
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { convertFloat32ToPCM16, computeRMS, computePCMAmplitude } from "../utils/pcm";
+import { AudioStreamer } from "../lib/audio-streamer";
+
+// Build version — visible in console to confirm code is fresh after refresh
+const BUILD_VERSION = "v3-audiostreamer-" + Date.now();
 
 /**
  * Voice Activity Detection threshold for barge-in.
- * When user audio RMS exceeds this while Sarah is speaking,
- * the playback buffer is flushed. Can be tuned based on
- * microphone sensitivity and ambient noise levels.
  */
 export const VAD_THRESHOLD = 0.015;
 
 /**
  * Barge-in detection logic (exported for testing -- COMP-01).
- *
- * Checks if the user is speaking loudly enough over Sarah's audio
- * and flushes the playback buffer to allow natural interruption.
- *
- * @param {number} rms - RMS amplitude of user audio (0-1)
- * @param {boolean} isSarahSpeaking - Whether Sarah is currently speaking
- * @param {{ postMessage: Function }} playerPort - AudioWorklet player port
- * @returns {boolean} True if barge-in was triggered
  */
-export function checkBargeIn(rms, isSarahSpeaking, playerPort) {
-  if (rms > VAD_THRESHOLD && isSarahSpeaking && playerPort) {
-    playerPort.postMessage({ command: "clearBuffer" });
+export function checkBargeIn(rms, isSarahSpeaking, audioStreamer) {
+  if (rms > VAD_THRESHOLD && isSarahSpeaking && audioStreamer) {
+    audioStreamer.stop();
     return true;
   }
   return false;
@@ -46,16 +43,6 @@ let transcriptIdCounter = 0;
 
 /**
  * Custom React hook for managing a voice call session.
- *
- * @returns {{
- *   status: string,
- *   transcripts: Array<{speaker: string, text: string, id: number}>,
- *   userAmplitude: number,
- *   sarahAmplitude: number,
- *   callStartTime: Date|null,
- *   startCall: (leadId: string) => Promise<void>,
- *   endCall: () => void,
- * }}
  */
 export function useVoiceSession() {
   // ---- State ----
@@ -70,7 +57,7 @@ export function useVoiceSession() {
   const recordContextRef = useRef(null);
   const playContextRef = useRef(null);
   const recorderNodeRef = useRef(null);
-  const playerNodeRef = useRef(null);
+  const audioStreamerRef = useRef(null);
   const streamRef = useRef(null);
   const isSarahSpeakingRef = useRef(false);
   const frameCountRef = useRef(0);
@@ -83,6 +70,12 @@ export function useVoiceSession() {
       wsRef.current.close(1000, "Call ended by user");
     }
     wsRef.current = null;
+
+    // Stop audio streamer
+    if (audioStreamerRef.current) {
+      audioStreamerRef.current.stop();
+      audioStreamerRef.current = null;
+    }
 
     // Stop MediaStream tracks
     if (streamRef.current) {
@@ -101,7 +94,6 @@ export function useVoiceSession() {
     }
 
     recorderNodeRef.current = null;
-    playerNodeRef.current = null;
 
     setStatus("ended");
   }, []);
@@ -111,6 +103,8 @@ export function useVoiceSession() {
     async (leadId) => {
       // React Strict Mode guard: prevent double creation
       if (wsRef.current) return;
+
+      console.log("[VoiceSession]", BUILD_VERSION, "starting call for", leadId);
 
       setStatus("connecting");
       setTranscripts([]);
@@ -123,23 +117,26 @@ export function useVoiceSession() {
         // 1. Create recording AudioContext at 16kHz (MUST be in click handler)
         const recordContext = new AudioContext({ sampleRate: 16000 });
         recordContextRef.current = recordContext;
+        console.log("[VoiceSession] Record context sampleRate:", recordContext.sampleRate);
 
-        // 2. Create playback AudioContext at 24kHz
-        const playContext = new AudioContext({ sampleRate: 24000 });
+        // 2. Create playback AudioContext at system default rate.
+        // AudioBuffers are created at 24kHz — browser auto-resamples.
+        // Avoids Chrome/Windows issues with non-standard 24kHz contexts.
+        const playContext = new AudioContext();
         playContextRef.current = playContext;
+        console.log("[VoiceSession] Play context sampleRate:", playContext.sampleRate, "(system default)");
 
-        // 3. Load AudioWorklet modules
+        // Ensure context is running (Chrome autoplay policy)
+        if (playContext.state === "suspended") {
+          await playContext.resume();
+        }
+
+        // 3. Load AudioWorklet for recording only
         const recorderUrl = new URL(
           "../audio/pcm-recorder-processor.js",
           import.meta.url
         );
-        const playerUrl = new URL(
-          "../audio/pcm-player-processor.js",
-          import.meta.url
-        );
-
         await recordContext.audioWorklet.addModule(recorderUrl);
-        await playContext.audioWorklet.addModule(playerUrl);
 
         // 4. Request microphone
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -156,13 +153,10 @@ export function useVoiceSession() {
         recorderNodeRef.current = recorderNode;
         source.connect(recorderNode);
 
-        // 6. Wire playback pipeline
-        const playerNode = new AudioWorkletNode(
-          playContext,
-          "pcm-player-processor"
-        );
-        playerNodeRef.current = playerNode;
-        playerNode.connect(playContext.destination);
+        // 6. Create AudioStreamer for playback (Google's reference pattern)
+        const audioStreamer = new AudioStreamer(playContext);
+        audioStreamerRef.current = audioStreamer;
+        console.log("[VoiceSession] AudioStreamer created");
 
         // 7. Open WebSocket
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -171,7 +165,7 @@ export function useVoiceSession() {
         ws.binaryType = "arraybuffer"; // CRITICAL: prevents Blob default
         wsRef.current = ws;
 
-        // 8. Recorder onmessage: convert and send to WebSocket + barge-in detection
+        // 8. Recorder onmessage: convert and send to WebSocket + barge-in
         recorderNode.port.onmessage = (event) => {
           const float32Data = event.data;
           const pcm16Buffer = convertFloat32ToPCM16(float32Data);
@@ -188,22 +182,37 @@ export function useVoiceSession() {
             setUserAmplitude(rms);
 
             // Barge-in detection
-            if (checkBargeIn(rms, isSarahSpeakingRef.current, playerNode.port)) {
+            if (checkBargeIn(rms, isSarahSpeakingRef.current, audioStreamer)) {
               isSarahSpeakingRef.current = false;
+              // Resume streamer for next response
+              audioStreamer.resume();
             }
           }
         };
 
         // 9. WebSocket event handlers
         ws.onopen = () => {
+          console.log("[VoiceSession] WebSocket connected");
           setStatus("connected");
           setCallStartTime(new Date());
         };
 
+        let audioChunkCount = 0;
         ws.onmessage = (event) => {
           if (event.data instanceof ArrayBuffer) {
-            // Binary audio from Sarah -- send to player
-            playerNode.port.postMessage(event.data);
+            audioChunkCount++;
+
+            // Log first few chunks for diagnostics
+            if (audioChunkCount <= 3 || audioChunkCount % 100 === 0) {
+              console.log(
+                "[VoiceSession] Audio chunk #" + audioChunkCount,
+                event.data.byteLength + " bytes",
+                audioStreamer.diagnostics
+              );
+            }
+
+            // Feed PCM16 audio to the streamer for scheduled playback
+            audioStreamer.addPCM16(event.data);
 
             // Compute Sarah amplitude
             const amplitude = computePCMAmplitude(event.data);
@@ -219,20 +228,36 @@ export function useVoiceSession() {
             sarahSilenceTimerRef.current = setTimeout(() => {
               isSarahSpeakingRef.current = false;
               setSarahAmplitude(0);
-            }, 200);
+            }, 300);
           } else {
             // Text message -- parse as JSON transcript
             try {
               const msg = JSON.parse(event.data);
-              if (msg.type === "transcript") {
-                setTranscripts((prev) => [
-                  ...prev,
-                  {
-                    speaker: msg.speaker,
-                    text: msg.text,
-                    id: ++transcriptIdCounter,
-                  },
-                ]);
+              if (msg.type === "ready") {
+                console.log("[VoiceSession] Backend ready signal received");
+              } else if (msg.type === "transcript") {
+                setTranscripts((prev) => {
+                  // Append to last entry if same speaker
+                  if (
+                    prev.length > 0 &&
+                    prev[prev.length - 1].speaker === msg.speaker
+                  ) {
+                    const updated = [...prev];
+                    updated[updated.length - 1] = {
+                      ...updated[updated.length - 1],
+                      text: updated[updated.length - 1].text + msg.text,
+                    };
+                    return updated;
+                  }
+                  return [
+                    ...prev,
+                    {
+                      speaker: msg.speaker,
+                      text: msg.text,
+                      id: ++transcriptIdCounter,
+                    },
+                  ];
+                });
               }
             } catch (e) {
               // Ignore unparseable messages
@@ -241,15 +266,16 @@ export function useVoiceSession() {
         };
 
         ws.onclose = () => {
+          console.log("[VoiceSession] WebSocket closed");
           setStatus("ended");
         };
 
         ws.onerror = (error) => {
-          console.error("WebSocket error:", error);
+          console.error("[VoiceSession] WebSocket error:", error);
           setStatus("ended");
         };
       } catch (error) {
-        console.error("Failed to start call:", error);
+        console.error("[VoiceSession] Failed to start call:", error);
         endCall();
       }
     },
