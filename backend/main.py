@@ -1,11 +1,13 @@
 """FastAPI server for Cloudboosta Voice Agent (System B)."""
 
 import logging
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from config import config
 from voice_handler import handle_voice_session
@@ -96,4 +98,20 @@ async def get_latest_call(lead_id: str):
         )
 
 
-# TODO: Phase 6 — Twilio webhook routes
+# TODO: Phase 7 — Twilio webhook routes
+
+# --- Serve frontend static files (production) ---
+_static_dir = Path(__file__).parent / "static"
+if _static_dir.exists():
+    _assets_dir = _static_dir / "assets"
+    if _assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="static-assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        """SPA fallback: serve index.html for all non-API/WS routes."""
+        file_path = (_static_dir / full_path).resolve()
+        static_root = _static_dir.resolve()
+        if file_path.is_relative_to(static_root) and file_path.is_file():
+            return FileResponse(str(file_path))
+        return FileResponse(str(_static_dir / "index.html"))

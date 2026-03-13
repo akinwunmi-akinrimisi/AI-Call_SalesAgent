@@ -8,6 +8,13 @@ secrets/
 !.planning/**/*.json
 !.planning/config.json
 
+# Terraform
+terraform.tfvars
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+
 # Python
 __pycache__/
 *.pyc
