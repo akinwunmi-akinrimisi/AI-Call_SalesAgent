@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import config
 from voice_handler import handle_voice_session
-from minimal_test import handle_minimal_test, handle_minimal_twilio
+from minimal_test import handle_minimal_test, handle_minimal_twilio, handle_manual_vad_twilio
 import twilio_handler
 
 logger = logging.getLogger(__name__)
@@ -160,6 +160,30 @@ async def twilio_test_minimal_voice(request: Request):
 
     twiml = str(response)
     logger.info("Minimal test TwiML: %s", twiml)
+    return Response(content=twiml, media_type="application/xml")
+
+
+@app.websocket("/ws/test/manual-vad")
+async def test_manual_vad(websocket: WebSocket):
+    """Manual VAD Twilio test — bypasses Gemini's broken speech detection."""
+    model = websocket.query_params.get("model", "")
+    await handle_manual_vad_twilio(websocket, model_override=model)
+
+
+@app.api_route("/twilio/test-manual-vad", methods=["GET", "POST"])
+async def twilio_test_manual_vad_voice(request: Request):
+    """TwiML for manual VAD test — uses send_client_content instead of VAD."""
+    base_url = str(request.base_url).rstrip("/").replace("http://", "https://")
+    ws_url = base_url.replace("https://", "wss://")
+
+    response = twilio_handler.VoiceResponse()
+    connect = twilio_handler.Connect()
+    stream = twilio_handler.Stream(url=f"{ws_url}/ws/test/manual-vad")
+    connect.append(stream)
+    response.append(connect)
+
+    twiml = str(response)
+    logger.info("Manual VAD TwiML: %s", twiml)
     return Response(content=twiml, media_type="application/xml")
 
 
