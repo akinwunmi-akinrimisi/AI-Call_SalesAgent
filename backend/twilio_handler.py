@@ -241,6 +241,15 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
         input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
         tools=TOOL_DECLARATIONS,
+        realtime_input_config=types.RealtimeInputConfig(
+            automatic_activity_detection=types.AutomaticActivityDetection(
+                disabled=False,
+                start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
+                prefix_padding_ms=20,
+                silence_duration_ms=500,
+            ),
+        ),
     )
 
     if is_native_audio:
@@ -318,15 +327,16 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                                     bytes(mulaw_buffer), ratecv_state
                                 )
                                 upstream_forwarded += 1
-                                if upstream_forwarded <= 3 or upstream_forwarded % 100 == 0:
+                                rms = audioop.rms(pcm_16k, 2)
+                                if upstream_forwarded <= 5 or upstream_forwarded % 50 == 0:
                                     logger.info(
-                                        "Twilio upstream batch #%d: %d pcm16k "
-                                        "(discarded %d during greeting)",
+                                        "Twilio upstream batch #%d: %d bytes "
+                                        "rms=%d (discarded %d during greeting)",
                                         upstream_forwarded, len(pcm_16k),
-                                        upstream_discarded,
+                                        rms, upstream_discarded,
                                     )
                                 await session.send_realtime_input(
-                                    media=types.Blob(
+                                    audio=types.Blob(
                                         mime_type="audio/pcm;rate=16000",
                                         data=pcm_16k,
                                     )
@@ -341,7 +351,7 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                                     bytes(mulaw_buffer), ratecv_state
                                 )
                                 await session.send_realtime_input(
-                                    media=types.Blob(
+                                    audio=types.Blob(
                                         mime_type="audio/pcm;rate=16000",
                                         data=pcm_16k,
                                     )

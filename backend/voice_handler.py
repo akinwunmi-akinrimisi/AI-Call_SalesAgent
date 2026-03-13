@@ -387,7 +387,7 @@ async def handle_voice_session(websocket: WebSocket, lead_id: str) -> None:
                                 upstream_count - upstream_forwarded,
                             )
                         await session.send_realtime_input(
-                            media=types.Blob(
+                            audio=types.Blob(
                                 mime_type="audio/pcm;rate=16000", data=data
                             )
                         )
