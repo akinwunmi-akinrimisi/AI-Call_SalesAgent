@@ -462,14 +462,14 @@ MIN_SPEECH_FRAMES = 10       # Minimum ~200ms of speech to be a real utterance
 async def handle_manual_vad_twilio(websocket: WebSocket, model_override: str = "") -> None:
     """Twilio handler with manual VAD — bypasses Gemini's broken speech detection.
 
-    Instead of send_realtime_input (which relies on Gemini VAD), this:
-    1. Buffers incoming PCM 16kHz audio
-    2. Detects speech start/end via RMS thresholds
-    3. Sends complete utterances via send_client_content with audio Blob
-    4. Sets turn_complete=True to force Gemini to respond
+    Uses activity_start/activity_end signals with streaming audio chunks:
+    1. Detect speech start via RMS threshold → send activity_start
+    2. Stream each audio chunk via send_realtime_input(audio=Blob)
+    3. Detect speech end via silence → send activity_end
+    4. Gemini processes accumulated audio and responds
 
-    This still uses Gemini Live API for audio generation (competition
-    requirement) but doesn't depend on their broken VAD.
+    This still uses Gemini Live API (competition requirement) but doesn't
+    depend on their broken automatic speech detection.
     """
     await websocket.accept()
 
@@ -543,18 +543,19 @@ async def handle_manual_vad_twilio(websocket: WebSocket, model_override: str = "
 
             call_ended = asyncio.Event()
             greeting_done = asyncio.Event()
+            # Lock to prevent sending audio while Gemini is responding
+            gemini_responding = asyncio.Event()
             upstream_count = 0
             downstream_count = 0
             utterances_sent = 0
 
             # Speech detection state
-            speech_buffer: list[bytes] = []  # PCM 16kHz chunks during speech
             is_speaking = False
             silence_count = 0
             speech_frame_count = 0
 
             async def upstream():
-                """Read Twilio audio, detect speech, send complete utterances."""
+                """Read Twilio audio, detect speech boundaries, stream to Gemini."""
                 nonlocal upstream_count, is_speaking, silence_count
                 nonlocal speech_frame_count, utterances_sent
 
@@ -587,21 +588,52 @@ async def handle_manual_vad_twilio(websocket: WebSocket, model_override: str = "
                         samples_16k = soxr.resample(samples_8k, 8000, 16000)
                         pcm_16k = samples_16k.astype(np.int16).tobytes()
 
-                        # Manual VAD logic
+                        # Don't send audio while Gemini is responding
+                        if gemini_responding.is_set():
+                            continue
+
+                        # Manual VAD logic with activity signals
                         if not is_speaking:
                             if rms >= SPEECH_START_RMS:
                                 is_speaking = True
                                 silence_count = 0
                                 speech_frame_count = 1
-                                speech_buffer.clear()
-                                speech_buffer.append(pcm_16k)
+                                utterances_sent += 1
                                 logger.info(
-                                    "MANUAL_VAD: speech START detected rms=%d (chunk #%d)",
-                                    rms, upstream_count,
+                                    "MANUAL_VAD: speech START #%d rms=%d (chunk #%d) → sending activity_start",
+                                    utterances_sent, rms, upstream_count,
                                 )
+                                # Signal speech start to Gemini
+                                try:
+                                    await session.send_realtime_input(
+                                        activity_start=types.ActivityStart()
+                                    )
+                                    # Send this first chunk
+                                    await session.send_realtime_input(
+                                        audio=types.Blob(
+                                            data=pcm_16k,
+                                            mime_type="audio/pcm;rate=16000",
+                                        )
+                                    )
+                                except Exception as exc:
+                                    logger.error("MANUAL_VAD: activity_start failed: %s", exc)
+                                    call_ended.set()
+                                    return
                         else:
-                            speech_buffer.append(pcm_16k)
                             speech_frame_count += 1
+
+                            # Stream audio to Gemini during speech
+                            try:
+                                await session.send_realtime_input(
+                                    audio=types.Blob(
+                                        data=pcm_16k,
+                                        mime_type="audio/pcm;rate=16000",
+                                    )
+                                )
+                            except Exception as exc:
+                                logger.error("MANUAL_VAD: audio send failed: %s", exc)
+                                call_ended.set()
+                                return
 
                             if rms < SPEECH_END_RMS:
                                 silence_count += 1
@@ -612,52 +644,35 @@ async def handle_manual_vad_twilio(websocket: WebSocket, model_override: str = "
                                 # Speech ended
                                 is_speaking = False
                                 logger.info(
-                                    "MANUAL_VAD: speech END after %d frames (%d bytes, %d silence frames)",
-                                    speech_frame_count,
-                                    sum(len(c) for c in speech_buffer),
-                                    silence_count,
+                                    "MANUAL_VAD: speech END #%d after %d frames (%.1fs, %d silence) → sending activity_end",
+                                    utterances_sent, speech_frame_count,
+                                    speech_frame_count * 0.02, silence_count,
                                 )
 
                                 if speech_frame_count >= MIN_SPEECH_FRAMES:
-                                    # Concatenate all speech audio
-                                    full_audio = b"".join(speech_buffer)
-                                    speech_buffer.clear()
-                                    utterances_sent += 1
-
-                                    logger.info(
-                                        "MANUAL_VAD: sending utterance #%d (%d bytes = %.1fs) via send_client_content",
-                                        utterances_sent,
-                                        len(full_audio),
-                                        len(full_audio) / (16000 * 2),
-                                    )
-
-                                    # Send audio as a complete turn
+                                    # Signal speech end to Gemini
                                     try:
-                                        await session.send_client_content(
-                                            turns=types.Content(
-                                                role="user",
-                                                parts=[
-                                                    types.Part(
-                                                        inline_data=types.Blob(
-                                                            data=full_audio,
-                                                            mime_type="audio/pcm;rate=16000",
-                                                        )
-                                                    )
-                                                ],
-                                            ),
-                                            turn_complete=True,
+                                        await session.send_realtime_input(
+                                            activity_end=types.ActivityEnd()
                                         )
-                                        logger.info("MANUAL_VAD: utterance #%d sent OK", utterances_sent)
+                                        logger.info("MANUAL_VAD: activity_end sent OK")
                                     except Exception as exc:
-                                        logger.error("MANUAL_VAD: send failed: %s", exc)
+                                        logger.error("MANUAL_VAD: activity_end failed: %s", exc)
                                         call_ended.set()
                                         return
                                 else:
                                     logger.info(
-                                        "MANUAL_VAD: discarded short utterance (%d frames)",
+                                        "MANUAL_VAD: short utterance (%d frames), sending activity_end anyway",
                                         speech_frame_count,
                                     )
-                                    speech_buffer.clear()
+                                    try:
+                                        await session.send_realtime_input(
+                                            activity_end=types.ActivityEnd()
+                                        )
+                                    except Exception as exc:
+                                        logger.error("MANUAL_VAD: activity_end failed: %s", exc)
+                                        call_ended.set()
+                                        return
 
                         # Periodic logging
                         if upstream_count <= 5 or upstream_count % 500 == 0:
@@ -712,10 +727,19 @@ async def handle_manual_vad_twilio(websocket: WebSocket, model_override: str = "
                         if has_output_tx:
                             logger.info("MANUAL_VAD >>> AGENT SAID: %s", msg.server_content.output_transcription.text)
 
-                        # Mark greeting as done on turn_complete
+                        # Track greeting completion
                         if turn_complete and not greeting_done.is_set():
                             greeting_done.set()
                             logger.info("MANUAL_VAD: greeting complete, accepting user audio")
+
+                        # Track when Gemini starts/stops responding (after greeting)
+                        if greeting_done.is_set():
+                            if msg.server_content and msg.server_content.model_turn:
+                                if not gemini_responding.is_set():
+                                    gemini_responding.set()
+                            if turn_complete:
+                                gemini_responding.clear()
+                                logger.info("MANUAL_VAD: Gemini turn complete, accepting audio again")
 
                         # Send audio back to Twilio
                         if msg.server_content and msg.server_content.model_turn:
