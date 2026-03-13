@@ -107,7 +107,6 @@ async def initiate_call(lead_id: str, to_number: str, base_url: str) -> dict:
         to=to_number,
         from_=config.twilio_phone_number,
         url=twiml_url,
-        timeout=1200,  # 20-minute max call duration
         record=True,
         recording_status_callback=f"{base_url}/twilio/recording?lead_id={lead_id}",
         status_callback=f"{base_url}/twilio/status?lead_id={lead_id}",
