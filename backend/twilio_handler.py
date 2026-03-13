@@ -275,24 +275,23 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
         ) as session:
             logger.info("Gemini Live connected for Twilio call (lead=%s)", lead_id)
 
-            # Trigger Sarah's greeting
-            await session.send_client_content(
-                turns=types.Content(
-                    role="user",
-                    parts=[types.Part(text="Hello")],
-                ),
-                turn_complete=True,
+            # Trigger Sarah's greeting via realtime input (NOT
+            # send_client_content) so the session stays in realtime
+            # mode. Using send_client_content followed by
+            # send_realtime_input caused Gemini to ignore audio.
+            await session.send_realtime_input(
+                text="Hello"
             )
+            logger.info("Sent greeting trigger via send_realtime_input(text)")
 
             # Track whether Sarah is currently speaking (for interruption detection)
             sarah_speaking = asyncio.Event()
             call_ended = asyncio.Event()
 
             # Gate: don't forward user audio until Sarah's greeting
-            # finishes (turn_complete). Sending phone audio during the
-            # greeting causes echo (phone mic picks up Sarah's voice)
-            # which confuses Gemini's VAD and prevents it from responding.
-            greeting_done = asyncio.Event()
+            # audio starts arriving. This matches the browser handler
+            # behavior (upstream flows during greeting, not after).
+            greeting_started = asyncio.Event()
             upstream_forwarded = 0
             upstream_discarded = 0
 
@@ -314,7 +313,7 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
 
                         if event == "media":
                             # Discard all audio until greeting finishes
-                            if not greeting_done.is_set():
+                            if not greeting_started.is_set():
                                 upstream_discarded += 1
                                 continue
 
@@ -419,6 +418,14 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                                     was_speaking = True
                                     sarah_speaking.set()
 
+                                # Ungate upstream on first model audio
+                                # (matches browser handler behavior)
+                                if not greeting_started.is_set():
+                                    greeting_started.set()
+                                    logger.info(
+                                        "Greeting audio started, upstream ungated"
+                                    )
+
                                 for part in sc.model_turn.parts:
                                     if (
                                         hasattr(part, "inline_data")
@@ -450,26 +457,14 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
 
                             # Turn complete — Sarah stopped speaking
                             if hasattr(sc, "turn_complete") and sc.turn_complete:
-                                logger.info("Sarah turn complete (was_speaking=%s)", was_speaking)
+                                logger.info(
+                                    "Sarah turn complete (was_speaking=%s, "
+                                    "upstream_fwd=%d, discarded=%d)",
+                                    was_speaking, upstream_forwarded,
+                                    upstream_discarded,
+                                )
                                 was_speaking = False
                                 sarah_speaking.clear()
-                                # Ungate upstream audio now that greeting is done
-                                if not greeting_done.is_set():
-                                    greeting_done.set()
-                                    logger.info(
-                                        "Greeting done, upstream ungated "
-                                        "(discarded %d chunks during greeting)",
-                                        upstream_discarded,
-                                    )
-                                    # Nudge Gemini to listen for realtime audio
-                                    # after the text-triggered greeting exchange
-                                    try:
-                                        await session.send_realtime_input(
-                                            text="[listening]"
-                                        )
-                                        logger.info("Sent realtime text nudge")
-                                    except Exception as exc:
-                                        logger.warning("Realtime text nudge failed: %s", exc)
 
                             # Interruption: Gemini detected user barge-in
                             if hasattr(sc, "interrupted") and sc.interrupted:
