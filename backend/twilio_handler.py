@@ -61,10 +61,11 @@ def mulaw_to_pcm16k(mulaw_bytes: bytes) -> bytes:
 
 
 def pcm24k_to_mulaw8k(pcm_bytes: bytes) -> bytes:
-    """Convert PCM16 24kHz from Gemini → mulaw 8kHz for Twilio."""
-    pcm_24k_np = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float64)
-    pcm_8k_np = soxr.resample(pcm_24k_np, 24000, 8000)
-    pcm_8k = pcm_8k_np.astype(np.int16).tobytes()
+    """Convert PCM16 24kHz from Gemini → mulaw 8kHz for Twilio.
+
+    Uses audioop.ratecv for resampling (stdlib, no numpy/soxr needed).
+    """
+    pcm_8k, _ = audioop.ratecv(pcm_bytes, 2, 1, 24000, 8000, None)
     return audioop.lin2ulaw(pcm_8k, 2)
 
 
