@@ -64,10 +64,10 @@ def generate_conversation_relay_twiml(lead_id: str, base_url: str) -> str:
         "<Response>"
         "<Connect>"
         f'<ConversationRelay url="{ws_url}/ws/conversation-relay" '
-        f'voice="Google.en-US-Journey-O" '
+        f'voice="en-US-Neural2-F" '
         f'language="en-US" '
-        f'ttsProvider="Google" '
-        f'transcriptionProvider="Google" '
+        f'ttsProvider="google" '
+        f'transcriptionProvider="google" '
         f'interruptible="true" '
         f'welcomeGreeting="" '
         f'>'
