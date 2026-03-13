@@ -24,8 +24,8 @@ from tools import write_call_log_to_supabase, write_lead_profile_to_supabase
 if TYPE_CHECKING:
     from google.adk.agents.live_request_queue import LiveRequestQueue
 
-# Default watchdog timeout: 8.5 minutes = 510 seconds
-WATCHDOG_SECONDS = 510.0
+# Default watchdog timeout: 10 minutes = 600 seconds (first nudge)
+WATCHDOG_SECONDS = 600.0
 
 
 class CallSession:

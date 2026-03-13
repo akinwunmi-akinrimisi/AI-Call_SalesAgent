@@ -5,7 +5,9 @@ We bridge text between ConversationRelay and Gemini Chat API with:
 
 - **Streaming**: Uses Gemini send_message_stream for low-latency first response
 - **Sentence-level TTS**: Sends each sentence with last=true for immediate playback
-- **Interrupt handling**: Cancels current response when caller interrupts
+- **Interrupt handling**: Cancels current response when caller interrupts;
+  asks caller to repeat if interrupt was unclear
+- **Multi-stage watchdog**: 10min nudge, 15min wrap-up, 19:20 callback offer
 
     Caller speaks -> Twilio STT -> {"type":"prompt","voicePrompt":"..."} -> WebSocket
     -> chat.send_message_stream(text) -> Gemini
@@ -36,6 +38,8 @@ from logger import log_event
 from voice_handler import (
     TOOL_DECLARATIONS,
     WATCHDOG_SECONDS,
+    WATCHDOG_15_SECONDS,
+    WATCHDOG_FINAL_SECONDS,
     _handle_tool_call,
     fetch_lead,
     get_firestore_client,
@@ -43,12 +47,11 @@ from voice_handler import (
 
 logger = logging.getLogger(__name__)
 
-# Sentence boundary: period/exclamation/question followed by space (or end).
-# Handles "..." ellipsis too. Avoids splitting on Mr. Mrs. Dr. etc.
+# Sentence boundary: punctuation followed by space + capital letter or quote
 _SENTENCE_SPLIT = re.compile(
-    r'(?<=[.!?])\s+(?=[A-Z"])'  # punctuation + space + capital letter
-    r'|(?<=\.\.\.)\s+'           # ellipsis + space
-    r'|(?<=[.!?])\s*$'           # punctuation at end of text
+    r'(?<=[.!?])\s+(?=[A-Z"\'])'
+    r'|(?<=\.\.\.)\s+'
+    r'|(?<=[.!?])\s*$'
 )
 
 
@@ -59,23 +62,17 @@ def _split_sentences(text: str) -> list[str]:
 
 
 def generate_conversation_relay_twiml(lead_id: str, base_url: str) -> str:
-    """Generate TwiML XML with <ConversationRelay> noun.
-
-    Args:
-        lead_id: UUID of the lead (passed as custom parameter).
-        base_url: Service URL (https:// converted to wss:// for WebSocket).
-
-    Returns:
-        TwiML XML string.
-    """
+    """Generate TwiML XML with <ConversationRelay> noun."""
     ws_url = base_url.replace("https://", "wss://").replace("http://", "ws://")
 
+    # Voice: en-US-Studio-O is Google's most natural female voice
+    # (Studio voices are premium conversational voices)
     twiml = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<Response>"
         "<Connect>"
         f'<ConversationRelay url="{ws_url}/ws/conversation-relay" '
-        f'voice="en-US-Neural2-F" '
+        f'voice="en-US-Studio-O" '
         f'language="en-US" '
         f'ttsProvider="google" '
         f'transcriptionProvider="google" '
@@ -91,17 +88,7 @@ def generate_conversation_relay_twiml(lead_id: str, base_url: str) -> str:
 
 
 async def handle_conversation_relay(websocket: WebSocket) -> None:
-    """Handle Twilio ConversationRelay WebSocket connection.
-
-    Protocol flow:
-    1. Twilio sends "setup" event with callSid, customParameters
-    2. We create a Gemini Chat session using lead_id
-    3. Gemini greeting is triggered via streaming send
-    4. Twilio sends "prompt" events with voicePrompt (STT text)
-    5. We stream Gemini response sentence-by-sentence
-    6. Handle tool calls (update_lead_profile, determine_call_outcome)
-    7. Twilio sends "interrupt" when caller interrupts TTS — we cancel response
-    """
+    """Handle Twilio ConversationRelay WebSocket connection."""
     await websocket.accept()
     logger.info("ConversationRelay: WebSocket connected")
 
@@ -113,7 +100,7 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
         raw = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
         msg = json.loads(raw)
         if msg.get("type") != "setup":
-            logger.error("ConversationRelay: expected setup, got %s", msg.get("type"))
+            logger.error("CR: expected setup, got %s", msg.get("type"))
             await websocket.close(code=4000, reason="Expected setup message")
             return
 
@@ -121,19 +108,19 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
         custom_params = msg.get("customParameters", {})
         lead_id = custom_params.get("lead_id", "")
         logger.info(
-            "ConversationRelay setup: callSid=%s lead_id=%s from=%s to=%s",
+            "CR setup: callSid=%s lead_id=%s from=%s to=%s",
             call_sid, lead_id, msg.get("from"), msg.get("to"),
         )
     except asyncio.TimeoutError:
-        logger.error("ConversationRelay: setup timeout")
+        logger.error("CR: setup timeout")
         await websocket.close(code=4000, reason="Setup timeout")
         return
     except (WebSocketDisconnect, Exception) as exc:
-        logger.error("ConversationRelay: setup failed: %s", exc)
+        logger.error("CR: setup failed: %s", exc)
         return
 
     if not lead_id:
-        logger.error("ConversationRelay: no lead_id in customParameters")
+        logger.error("CR: no lead_id in customParameters")
         await websocket.close(code=4000, reason="Missing lead_id")
         return
 
@@ -160,15 +147,15 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
         lead_name = lead.get("name", "there")
         system_instruction = build_system_instruction(lead_name, kb_content)
         logger.info(
-            "ConversationRelay setup in %.1fs: lead=%s (%s)",
+            "CR setup in %.1fs: lead=%s (%s)",
             time.time() - t0, lead_id, lead_name,
         )
     except Exception as exc:
-        logger.error("ConversationRelay setup failed: %s", exc, exc_info=True)
+        logger.error("CR setup failed: %s", exc, exc_info=True)
         await _send_json(websocket, {"type": "end"})
         return
 
-    # ---- Gemini Chat session (regular API, NOT Live) ----
+    # ---- Gemini Chat session ----
     model_name = os.getenv("CR_GEMINI_MODEL", "gemini-2.5-flash")
     client = genai.Client(api_key=api_key)
 
@@ -192,7 +179,6 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
     ))
 
     # ---- Interrupt / cancel tracking ----
-    # Each response gets its own cancel event. Setting it aborts the response.
     cancel_event = asyncio.Event()
 
     # ---- Send greeting ----
@@ -203,7 +189,7 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
         await _send_json(websocket, {"type": "end"})
         return
 
-    # ---- Message loop + watchdog ----
+    # ---- Message loop + multi-stage watchdog ----
     call_ended = asyncio.Event()
     chat_lock = asyncio.Lock()
 
@@ -225,10 +211,8 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
                     logger.info("CR >>> User said: %s", voice_prompt)
                     call_session.append_user_transcript(voice_prompt)
 
-                    # Cancel any ongoing response before starting new one
+                    # Cancel any ongoing response
                     cancel_event.set()
-
-                    # Fresh cancel event for this response
                     cancel_event = asyncio.Event()
 
                     async with chat_lock:
@@ -240,65 +224,119 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
                 elif msg_type == "interrupt":
                     utterance = msg.get("utteranceUntilInterrupt", "")
                     logger.info(
-                        "CR: caller interrupted. Spoken so far: '%s'",
-                        utterance[:100],
+                        "CR: interrupted after: '%s'", utterance[:100],
                     )
-                    # Signal the current response to stop sending TTS
+                    # Stop current TTS output
                     cancel_event.set()
 
                 elif msg_type == "dtmf":
-                    digit = msg.get("digit", "")
-                    logger.info("CR: DTMF digit: %s", digit)
+                    logger.info("CR: DTMF digit: %s", msg.get("digit", ""))
 
                 elif msg_type == "error":
-                    desc = msg.get("description", "")
-                    logger.error("CR error from Twilio: %s", desc)
+                    logger.error("CR error: %s", msg.get("description", ""))
 
                 elif msg_type == "setup":
-                    pass  # Duplicate setup, ignore
+                    pass
 
                 else:
-                    logger.debug("CR: unknown message type: %s", msg_type)
+                    logger.debug("CR: unknown msg type: %s", msg_type)
 
         except WebSocketDisconnect:
-            logger.info("ConversationRelay: Twilio disconnected")
+            logger.info("CR: Twilio disconnected")
         except Exception as exc:
             logger.error("CR receive error: %s", exc, exc_info=True)
         finally:
             call_ended.set()
 
-    async def watchdog():
-        """Send wrap-up signal after 8.5 minutes."""
-        call_session.watchdog_task = asyncio.current_task()
+    async def watchdog_10min():
+        """At 10 minutes: gentle time-check nudge."""
         await asyncio.sleep(WATCHDOG_SECONDS)
         if call_ended.is_set():
             return
+        logger.info("CR: 10-minute watchdog fired")
         try:
             async with chat_lock:
                 await _gemini_respond(
                     chat,
                     (
                         "[INTERNAL SYSTEM SIGNAL - DO NOT READ ALOUD] "
-                        "The call has reached 8.5 minutes. Begin wrapping up "
-                        "naturally. Summarize, recommend, ask for commitment, "
-                        "and close gracefully."
+                        "The call has reached 10 minutes. You have up to 20 "
+                        "minutes total. If you haven't made a programme "
+                        "recommendation yet, begin transitioning toward it. "
+                        "Continue naturally — do not rush or mention time."
                     ),
                     call_session,
                     websocket,
                     cancel_event,
                 )
         except Exception as exc:
-            logger.debug("Watchdog send failed: %s", exc)
+            logger.debug("10min watchdog failed: %s", exc)
+
+    async def watchdog_15min():
+        """At 15 minutes: begin wrapping up."""
+        await asyncio.sleep(WATCHDOG_15_SECONDS)
+        if call_ended.is_set():
+            return
+        logger.info("CR: 15-minute watchdog fired")
+        try:
+            async with chat_lock:
+                await _gemini_respond(
+                    chat,
+                    (
+                        "[INTERNAL SYSTEM SIGNAL - DO NOT READ ALOUD] "
+                        "The call has reached 15 minutes. Begin wrapping up "
+                        "naturally now. Summarize what you've discussed, make "
+                        "your recommendation if not done, and move toward the "
+                        "commitment ask. You have about 5 minutes left."
+                    ),
+                    call_session,
+                    websocket,
+                    cancel_event,
+                )
+        except Exception as exc:
+            logger.debug("15min watchdog failed: %s", exc)
+
+    async def watchdog_final():
+        """At 19:20: offer to call back if needed."""
+        await asyncio.sleep(WATCHDOG_FINAL_SECONDS)
+        if call_ended.is_set():
+            return
+        logger.info("CR: 19:20 final watchdog fired")
+        try:
+            async with chat_lock:
+                await _gemini_respond(
+                    chat,
+                    (
+                        "[INTERNAL SYSTEM SIGNAL - DO NOT READ ALOUD] "
+                        "The call is approaching the 20-minute limit. You "
+                        "MUST wrap up within 30 seconds. If you still have "
+                        "important things to cover, say something like: "
+                        "'I'm conscious of your time — would it be okay if "
+                        "I called you right back so we can finish up properly?' "
+                        "If the conversation is naturally concluding, just "
+                        "close warmly. ALWAYS call determine_call_outcome "
+                        "before the call ends."
+                    ),
+                    call_session,
+                    websocket,
+                    cancel_event,
+                )
+        except Exception as exc:
+            logger.debug("Final watchdog failed: %s", exc)
 
     # ---- Run concurrent tasks ----
+    watchdog_tasks = []
     try:
         results = await asyncio.gather(
             message_loop(),
-            watchdog(),
+            watchdog_10min(),
+            watchdog_15min(),
+            watchdog_final(),
             return_exceptions=True,
         )
-        task_names = ["twilio_rx", "watchdog"]
-        for name, result in zip(task_names, results):
+        for name, result in zip(
+            ["twilio_rx", "wd_10m", "wd_15m", "wd_final"], results
+        ):
             if isinstance(result, Exception):
                 logger.error("CR task '%s' failed: %s", name, result)
     finally:
@@ -337,22 +375,15 @@ async def _gemini_respond(
 ) -> None:
     """Send text to Gemini, stream response sentence-by-sentence to CR.
 
-    Uses send_message_stream for low first-token latency. Each complete
-    sentence is sent with last=true so Twilio TTS starts immediately.
-
-    Falls back to non-streaming send_message if streaming fails.
-
-    Handles chained tool calls: model may return function calls which we
-    execute and send results back until we get a text response.
+    Uses send_message_stream for low first-token latency. Falls back
+    to non-streaming if streaming fails.
     """
     try:
         await _gemini_stream_respond(
             chat, text, call_session, websocket, cancel_event,
         )
     except Exception as exc:
-        logger.warning(
-            "CR: streaming failed (%s), falling back to non-streaming", exc,
-        )
+        logger.warning("CR: streaming failed (%s), falling back", exc)
         await _gemini_nonstream_respond(
             chat, text, call_session, websocket, cancel_event,
         )
@@ -371,20 +402,20 @@ async def _gemini_stream_respond(
     function_calls: list = []
     cancelled = False
 
-    # Stream from Gemini — each chunk may contain partial text
-    async for chunk in chat.send_message_stream(text):
-        # Always consume full stream so chat history stays consistent.
-        # But stop SENDING to TTS if cancelled.
+    # FIX: await the stream coroutine, THEN iterate
+    stream = await chat.send_message_stream(text)
+    async for chunk in stream:
+        # Always consume full stream for chat history consistency
         if cancel_event.is_set():
             cancelled = True
 
         if cancelled:
             continue
 
-        # Detect function calls in this chunk
+        # Detect function calls
         _collect_function_calls(chunk, function_calls)
 
-        # Extract text from chunk
+        # Extract text
         try:
             chunk_text = chunk.text
         except (ValueError, AttributeError):
@@ -395,7 +426,7 @@ async def _gemini_stream_respond(
 
         buffer += chunk_text
 
-        # Send each complete sentence to TTS immediately
+        # Send complete sentences immediately for low-latency TTS
         while not cancelled:
             sentence, rest = _pop_sentence(buffer)
             if sentence is None:
@@ -411,7 +442,7 @@ async def _gemini_stream_respond(
                 cancelled = True
                 break
 
-    # Handle tool calls if present (non-streaming for tool responses)
+    # Handle tool calls (non-streaming for tool responses)
     if function_calls and not cancel_event.is_set():
         tool_text = await _handle_tool_rounds(
             chat, function_calls, call_session,
@@ -484,7 +515,7 @@ async def _gemini_nonstream_respond(
         call_session.append_agent_transcript(text_response)
         return
 
-    # Split into sentences and send each for immediate TTS
+    # Send sentence-by-sentence for immediate TTS
     sentences = _split_sentences(text_response)
     if not sentences:
         sentences = [text_response]
@@ -552,19 +583,12 @@ async def _handle_tool_rounds(
 def _pop_sentence(text: str) -> tuple[str | None, str]:
     """Extract first complete sentence from buffer.
 
-    Returns (sentence, remainder) or (None, original_text) if no complete
-    sentence found yet.
+    Returns (sentence, remainder) or (None, text) if none found yet.
     """
-    # Look for sentence-ending punctuation followed by space + uppercase,
-    # or punctuation at end of a substantial chunk.
-    # This handles: "Hello. How are you?" -> ("Hello.", " How are you?")
     patterns = [
-        # Period/exclamation/question + space + capital letter or quote
         r'([^.!?]*[.!?]+)\s+(?=[A-Z"\'])',
-        # Ellipsis + space
         r'(.*?\.\.\.)\s+',
     ]
-
     for pattern in patterns:
         match = re.match(pattern, text)
         if match:
@@ -572,12 +596,11 @@ def _pop_sentence(text: str) -> tuple[str | None, str]:
             rest = text[match.end():].lstrip()
             if sentence:
                 return sentence, rest
-
     return None, text
 
 
 def _collect_function_calls(chunk, dest: list) -> None:
-    """Extract function calls from a streaming chunk into dest list."""
+    """Extract function calls from a streaming chunk."""
     try:
         if chunk.candidates:
             for candidate in chunk.candidates:
@@ -600,7 +623,7 @@ def _extract_function_calls(response) -> list:
                         if hasattr(part, "function_call") and part.function_call:
                             calls.append(part.function_call)
     except Exception as exc:
-        logger.warning("CR: failed to extract function calls: %s", exc)
+        logger.warning("CR: extract function calls failed: %s", exc)
     return calls
 
 

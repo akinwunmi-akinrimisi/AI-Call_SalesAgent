@@ -45,8 +45,10 @@ _firestore_client: firestore.AsyncClient | None = None
 # Valid call outcomes
 VALID_OUTCOMES = ("COMMITTED", "FOLLOW_UP", "DECLINED")
 
-# Watchdog timeout: 8.5 minutes = 510 seconds
-WATCHDOG_SECONDS = 510.0
+# Watchdog timeouts (seconds) — 20 min max call duration
+WATCHDOG_SECONDS = 600.0        # 10 min: gentle time-check nudge
+WATCHDOG_15_SECONDS = 900.0     # 15 min: begin wrapping up
+WATCHDOG_FINAL_SECONDS = 1160.0 # 19 min 20s: offer callback
 
 # Tool declarations for Gemini Live
 TOOL_DECLARATIONS = [
