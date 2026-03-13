@@ -475,11 +475,7 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
         tools=TOOL_DECLARATIONS,
         realtime_input_config=types.RealtimeInputConfig(
             automatic_activity_detection=types.AutomaticActivityDetection(
-                disabled=False,
-                start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
-                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
-                prefix_padding_ms=20,
-                silence_duration_ms=300,
+                disabled=True,  # Manual VAD: we send activity_start/end ourselves
             ),
         ),
     )
@@ -549,13 +545,14 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                     call_ended.set()
 
             async def upstream_from_monitor():
-                """Read real audio from one-way inbound monitor queue,
-                resample to 16kHz PCM via soxr, buffer to ~100ms, send to Gemini.
+                """Read real audio from inbound monitor, resample to 16kHz,
+                send to Gemini with MANUAL VAD signaling.
 
-                Buffers 5 Twilio chunks (5×20ms = 100ms = 3200 bytes at 16kHz)
-                before sending, matching the chunk size browsers typically send.
-                Also saves first 10s of audio to /tmp/debug_inbound.raw for
-                verification.
+                Automatic VAD is disabled. We detect speech from RMS and
+                send activity_start/activity_end signals ourselves. This
+                bypasses Gemini's VAD which fails on telephony audio.
+
+                Also saves debug audio to /tmp/debug_inbound.raw.
                 """
                 nonlocal upstream_forwarded
 
@@ -573,15 +570,16 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
 
                 logger.info("Upstream: connected to inbound monitor queue (callSid=%s)", call_sid)
 
-                # Debug: save first 10s of audio (500 chunks × 20ms)
-                debug_file = open("/tmp/debug_inbound.raw", "wb")
-                debug_chunks_written = 0
-                DEBUG_MAX_CHUNKS = 500  # 10 seconds
+                # Manual VAD state
+                SPEECH_RMS_THRESHOLD = 200  # RMS above this = speech
+                SILENCE_CHUNKS_FOR_END = 15  # 15 × 20ms = 300ms of silence → end of speech
+                is_speaking = False
+                silence_counter = 0
 
-                # Buffer for accumulating ~100ms of audio before sending
-                CHUNKS_PER_SEND = 5  # 5 × 20ms = 100ms
-                pcm_buffer = bytearray()
-                chunks_buffered = 0
+                # Debug: save audio to file (start capturing after greeting)
+                debug_file = open("/tmp/debug_inbound.raw", "wb")
+                debug_bytes_written = 0
+                DEBUG_MAX_BYTES = 16000 * 2 * 10  # 10s at 16kHz 16-bit
 
                 try:
                     while not call_ended.is_set():
@@ -598,36 +596,25 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                             # Discard pre-greeting audio
                             continue
 
-                        # Read from queue with timeout
+                        # Read from queue — one chunk at a time for low latency
                         try:
-                            mulaw_bytes = await asyncio.wait_for(queue.get(), timeout=0.1)
+                            mulaw_bytes = await asyncio.wait_for(queue.get(), timeout=1.0)
                         except asyncio.TimeoutError:
-                            # Flush partial buffer on timeout (don't hold audio)
-                            if pcm_buffer:
-                                buf_bytes = bytes(pcm_buffer)
-                                upstream_forwarded += 1
-                                if upstream_forwarded <= 10 or upstream_forwarded % 50 == 0:
-                                    rms = audioop.rms(buf_bytes, 2)
-                                    logger.info(
-                                        "Upstream #%d: %d bytes rms=%d (flush, soxr 16kHz)",
-                                        upstream_forwarded, len(buf_bytes), rms,
-                                    )
-                                await session.send_realtime_input(
-                                    audio=types.Blob(
-                                        data=buf_bytes,
-                                        mime_type="audio/pcm;rate=16000",
-                                    )
-                                )
-                                pcm_buffer.clear()
-                                chunks_buffered = 0
                             continue
                         if mulaw_bytes is None:
                             logger.info("Inbound monitor ended")
+                            # Send final activity_end if still speaking
+                            if is_speaking:
+                                await session.send_realtime_input(
+                                    activity_end=types.ActivityEnd()
+                                )
+                                logger.info("Manual VAD: activity_end (stream ended)")
                             call_ended.set()
                             return
 
                         # Decode mulaw → PCM 8kHz
                         pcm_8k = audioop.ulaw2lin(mulaw_bytes, 2)
+                        chunk_rms = audioop.rms(pcm_8k, 2)
 
                         # High-quality resample 8kHz → 16kHz using soxr
                         samples_8k = np.frombuffer(pcm_8k, dtype=np.int16).astype(np.float64)
@@ -635,35 +622,53 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                         pcm_16k = samples_16k.astype(np.int16).tobytes()
 
                         # Debug: save to file
-                        if debug_chunks_written < DEBUG_MAX_CHUNKS:
+                        if debug_bytes_written < DEBUG_MAX_BYTES:
                             debug_file.write(pcm_16k)
-                            debug_chunks_written += 1
-                            if debug_chunks_written == DEBUG_MAX_CHUNKS:
+                            debug_bytes_written += len(pcm_16k)
+                            if debug_bytes_written >= DEBUG_MAX_BYTES and not debug_file.closed:
                                 debug_file.close()
-                                logger.info("Debug audio saved: /tmp/debug_inbound.raw (10s, 16kHz PCM16)")
+                                logger.info("Debug audio saved: /tmp/debug_inbound.raw (%d bytes)", debug_bytes_written)
 
-                        # Accumulate into buffer
-                        pcm_buffer.extend(pcm_16k)
-                        chunks_buffered += 1
-
-                        # Send when buffer has ~100ms of audio
-                        if chunks_buffered >= CHUNKS_PER_SEND:
-                            buf_bytes = bytes(pcm_buffer)
-                            upstream_forwarded += 1
-                            if upstream_forwarded <= 10 or upstream_forwarded % 50 == 0:
-                                rms = audioop.rms(buf_bytes, 2)
+                        # ---- Manual VAD: detect speech from RMS ----
+                        if chunk_rms >= SPEECH_RMS_THRESHOLD:
+                            silence_counter = 0
+                            if not is_speaking:
+                                is_speaking = True
+                                await session.send_realtime_input(
+                                    activity_start=types.ActivityStart()
+                                )
                                 logger.info(
-                                    "Upstream #%d: %d bytes rms=%d (100ms, soxr 16kHz)",
-                                    upstream_forwarded, len(buf_bytes), rms,
+                                    "Manual VAD: activity_start (rms=%d)",
+                                    chunk_rms,
                                 )
-                            await session.send_realtime_input(
-                                audio=types.Blob(
-                                    data=buf_bytes,
-                                    mime_type="audio/pcm;rate=16000",
-                                )
+                        else:
+                            if is_speaking:
+                                silence_counter += 1
+                                if silence_counter >= SILENCE_CHUNKS_FOR_END:
+                                    is_speaking = False
+                                    await session.send_realtime_input(
+                                        activity_end=types.ActivityEnd()
+                                    )
+                                    logger.info(
+                                        "Manual VAD: activity_end (silence %dms)",
+                                        silence_counter * 20,
+                                    )
+                                    silence_counter = 0
+
+                        # Send audio to Gemini (every chunk, 20ms = 640 bytes)
+                        upstream_forwarded += 1
+                        if upstream_forwarded <= 5 or chunk_rms >= SPEECH_RMS_THRESHOLD or upstream_forwarded % 200 == 0:
+                            logger.info(
+                                "Upstream #%d: %d bytes rms=%d speaking=%s",
+                                upstream_forwarded, len(pcm_16k), chunk_rms, is_speaking,
                             )
-                            pcm_buffer.clear()
-                            chunks_buffered = 0
+
+                        await session.send_realtime_input(
+                            audio=types.Blob(
+                                data=pcm_16k,
+                                mime_type="audio/pcm;rate=16000",
+                            )
+                        )
 
                 except Exception as exc:
                     logger.error("Upstream monitor error: %s", exc, exc_info=True)

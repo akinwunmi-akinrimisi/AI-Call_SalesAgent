@@ -108,6 +108,22 @@ async def get_latest_call(lead_id: str):
         )
 
 
+# ---- Debug Endpoints (temporary) ----
+
+
+@app.get("/debug/audio")
+async def debug_audio():
+    """Serve the debug audio file captured during last call."""
+    debug_path = Path("/tmp/debug_inbound.raw")
+    if debug_path.exists():
+        return FileResponse(
+            str(debug_path),
+            media_type="application/octet-stream",
+            filename="debug_inbound.raw",
+        )
+    return JSONResponse(status_code=404, content={"error": "No debug audio file"})
+
+
 # ---- Twilio Integration ----
 
 
