@@ -65,16 +65,15 @@ def generate_conversation_relay_twiml(lead_id: str, base_url: str) -> str:
     """Generate TwiML XML with <ConversationRelay> noun."""
     ws_url = base_url.replace("https://", "wss://").replace("http://", "ws://")
 
-    # Voice: en-US-Neural2-F (proven working with ConversationRelay)
-    # Note: Studio-O and Journey-F cause Twilio application errors.
-    # Naturalness is achieved via system instruction (short sentences,
-    # contractions, filler words, varied pacing) rather than voice model.
+    # Voice: Google Chirp3-HD — most human-like generative voice
+    # Kore = warm, conversational female voice. No "Google." prefix for CR.
+    # Fallback order if needed: Aoede, Leda, Zephyr (all female Chirp3-HD)
     twiml = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<Response>"
         "<Connect>"
         f'<ConversationRelay url="{ws_url}/ws/conversation-relay" '
-        f'voice="en-US-Neural2-F" '
+        f'voice="en-US-Chirp3-HD-Kore" '
         f'language="en-US" '
         f'ttsProvider="google" '
         f'transcriptionProvider="google" '
