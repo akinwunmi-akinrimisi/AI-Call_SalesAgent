@@ -122,6 +122,8 @@ async def initiate_call(request: Request):
         )
 
     base_url = str(request.base_url).rstrip("/")
+    # Cloud Run terminates TLS; force HTTPS for Twilio callbacks
+    base_url = base_url.replace("http://", "https://")
 
     try:
         result = await twilio_handler.initiate_call(lead_id, phone, base_url)
@@ -134,11 +136,12 @@ async def initiate_call(request: Request):
         )
 
 
-@app.post("/twilio/voice")
+@app.api_route("/twilio/voice", methods=["GET", "POST"])
 async def twilio_voice(request: Request):
     """TwiML webhook — returns Media Streams connection instructions."""
     lead_id = request.query_params.get("lead_id", "")
     base_url = str(request.base_url).rstrip("/")
+    base_url = base_url.replace("http://", "https://")
     twiml = twilio_handler.generate_twiml(lead_id, base_url)
     return Response(content=twiml, media_type="application/xml")
 
@@ -149,7 +152,7 @@ async def twilio_stream(websocket: WebSocket):
     await twilio_handler.handle_twilio_stream(websocket)
 
 
-@app.post("/twilio/recording")
+@app.api_route("/twilio/recording", methods=["GET", "POST"])
 async def twilio_recording(request: Request):
     """Twilio recording status callback — stores recording URL."""
     form = await request.form()
@@ -204,7 +207,7 @@ async def twilio_recording(request: Request):
     return {"status": "ok"}
 
 
-@app.post("/twilio/status")
+@app.api_route("/twilio/status", methods=["GET", "POST"])
 async def twilio_status(request: Request):
     """Twilio call status callback — logs call completion/failure."""
     form = await request.form()
