@@ -295,16 +295,13 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
             upstream_forwarded = 0
             upstream_discarded = 0
 
-            # Buffer 5 Twilio chunks (~100ms) and send as one batch.
-            # Reduces send rate from 50/sec to 10/sec, matching browser.
-            UPSTREAM_BUFFER_CHUNKS = 5
-
             async def upstream_twilio():
-                """Receive mulaw from Twilio → gate → buffer → convert → Gemini."""
+                """Receive mulaw from Twilio → decode → send PCM to Gemini.
+
+                No buffering, no resampling. Decode mulaw→PCM and send each
+                chunk at native 8kHz. Gemini auto-resamples internally.
+                """
                 nonlocal upstream_forwarded, upstream_discarded
-                mulaw_buffer = bytearray()
-                chunk_count = 0
-                ratecv_state = None  # preserve resampling state across batches
                 try:
                     while not call_ended.is_set():
                         raw = await websocket.receive_text()
@@ -312,49 +309,31 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                         event = msg.get("event")
 
                         if event == "media":
-                            # Discard all audio until greeting finishes
                             if not greeting_started.is_set():
                                 upstream_discarded += 1
                                 continue
 
                             payload = msg["media"]["payload"]
-                            mulaw_buffer.extend(base64.b64decode(payload))
-                            chunk_count += 1
-
-                            if chunk_count >= UPSTREAM_BUFFER_CHUNKS:
-                                pcm_16k, ratecv_state = mulaw_to_pcm16k(
-                                    bytes(mulaw_buffer), ratecv_state
+                            mulaw_bytes = base64.b64decode(payload)
+                            # Decode mulaw to 16-bit PCM at native 8kHz
+                            pcm_8k = audioop.ulaw2lin(mulaw_bytes, 2)
+                            upstream_forwarded += 1
+                            if upstream_forwarded <= 5 or upstream_forwarded % 100 == 0:
+                                rms = audioop.rms(pcm_8k, 2)
+                                logger.info(
+                                    "Twilio upstream #%d: %d bytes "
+                                    "rms=%d (discarded %d)",
+                                    upstream_forwarded, len(pcm_8k),
+                                    rms, upstream_discarded,
                                 )
-                                upstream_forwarded += 1
-                                rms = audioop.rms(pcm_16k, 2)
-                                if upstream_forwarded <= 10 or upstream_forwarded % 20 == 0:
-                                    logger.info(
-                                        "Twilio upstream batch #%d: %d bytes "
-                                        "rms=%d (discarded %d during greeting)",
-                                        upstream_forwarded, len(pcm_16k),
-                                        rms, upstream_discarded,
-                                    )
-                                await session.send_realtime_input(
-                                    audio=types.Blob(
-                                        mime_type="audio/pcm;rate=16000",
-                                        data=pcm_16k,
-                                    )
+                            await session.send_realtime_input(
+                                audio=types.Blob(
+                                    mime_type="audio/pcm;rate=8000",
+                                    data=pcm_8k,
                                 )
-                                mulaw_buffer.clear()
-                                chunk_count = 0
+                            )
 
                         elif event == "stop":
-                            # Flush remaining buffer
-                            if mulaw_buffer:
-                                pcm_16k, _ = mulaw_to_pcm16k(
-                                    bytes(mulaw_buffer), ratecv_state
-                                )
-                                await session.send_realtime_input(
-                                    audio=types.Blob(
-                                        mime_type="audio/pcm;rate=16000",
-                                        data=pcm_16k,
-                                    )
-                                )
                             logger.info(
                                 "Twilio stream stopped (fwd=%d, discarded=%d)",
                                 upstream_forwarded, upstream_discarded,
