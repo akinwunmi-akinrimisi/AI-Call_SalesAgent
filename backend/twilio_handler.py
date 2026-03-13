@@ -277,8 +277,16 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
             sarah_speaking = asyncio.Event()
             call_ended = asyncio.Event()
 
+            # Gate: don't forward user audio until Sarah's greeting audio
+            # starts arriving. Prevents background noise from the phone
+            # from flooding Gemini and interrupting the greeting via VAD.
+            greeting_started = asyncio.Event()
+            upstream_forwarded = 0
+            upstream_discarded = 0
+
             async def upstream_twilio():
                 """Receive mulaw audio from Twilio → convert → send to Gemini."""
+                nonlocal upstream_forwarded, upstream_discarded
                 try:
                     while not call_ended.is_set():
                         raw = await websocket.receive_text()
@@ -286,9 +294,22 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                         event = msg.get("event")
 
                         if event == "media":
+                            # Discard audio until greeting has started
+                            if not greeting_started.is_set():
+                                upstream_discarded += 1
+                                continue
+
                             payload = msg["media"]["payload"]
                             mulaw_bytes = base64.b64decode(payload)
                             pcm_16k = mulaw_to_pcm16k(mulaw_bytes)
+
+                            upstream_forwarded += 1
+                            if upstream_forwarded <= 3 or upstream_forwarded % 200 == 0:
+                                logger.info(
+                                    "Twilio upstream #%d: %d bytes (discarded %d prior)",
+                                    upstream_forwarded, len(pcm_16k), upstream_discarded,
+                                )
+
                             await session.send_realtime_input(
                                 media=types.Blob(
                                     mime_type="audio/pcm;rate=16000",
@@ -297,24 +318,40 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                             )
 
                         elif event == "stop":
-                            logger.info("Twilio stream stopped")
+                            logger.info("Twilio stream stopped (forwarded=%d, discarded=%d)",
+                                        upstream_forwarded, upstream_discarded)
                             call_ended.set()
                             return
 
+                        elif event == "mark":
+                            logger.debug("Twilio mark event: %s", msg.get("mark", {}))
+
                 except WebSocketDisconnect:
-                    logger.info("Twilio WebSocket disconnected (upstream)")
+                    logger.info("Twilio WebSocket disconnected (upstream, forwarded=%d)",
+                                upstream_forwarded)
                     call_ended.set()
                 except Exception as exc:
-                    logger.info("Twilio upstream ended: %s", exc)
+                    logger.error("Twilio upstream error: %s", exc, exc_info=True)
                     call_ended.set()
+
+            downstream_count = 0
 
             async def downstream_gemini():
                 """Receive Gemini audio → convert → send to Twilio as mulaw."""
+                nonlocal downstream_count
                 was_speaking = False
+                logger.info("Downstream: listening for Gemini responses...")
                 try:
                     async for msg in session.receive():
                         if call_ended.is_set():
                             return
+
+                        downstream_count += 1
+                        if downstream_count <= 5 or downstream_count % 50 == 0:
+                            logger.info(
+                                "Twilio downstream msg #%d: %s",
+                                downstream_count, type(msg).__name__,
+                            )
 
                         # ---- TOOL CALLS ----
                         if msg.tool_call:
@@ -341,6 +378,14 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
 
                             # Audio from Gemini → convert and send to Twilio
                             if sc.model_turn and sc.model_turn.parts:
+                                # First model audio = greeting started,
+                                # ungate the upstream audio forwarding
+                                if not greeting_started.is_set():
+                                    greeting_started.set()
+                                    logger.info(
+                                        "Greeting audio started, upstream ungated"
+                                    )
+
                                 if not was_speaking:
                                     was_speaking = True
                                     sarah_speaking.set()
@@ -369,17 +414,20 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                                                     }
                                                 )
                                             )
-                                        except (WebSocketDisconnect, Exception):
+                                        except (WebSocketDisconnect, Exception) as exc:
+                                            logger.info("Twilio send failed: %s", exc)
                                             call_ended.set()
                                             return
 
                             # Turn complete — Sarah stopped speaking
                             if hasattr(sc, "turn_complete") and sc.turn_complete:
+                                logger.info("Sarah turn complete (was_speaking=%s)", was_speaking)
                                 was_speaking = False
                                 sarah_speaking.clear()
 
                             # Interruption: Gemini detected user barge-in
                             if hasattr(sc, "interrupted") and sc.interrupted:
+                                logger.info("Barge-in detected, clearing Twilio buffer")
                                 was_speaking = False
                                 sarah_speaking.clear()
                                 # Send clear event to flush Twilio's audio buffer
@@ -392,8 +440,8 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                                             }
                                         )
                                     )
-                                    logger.info("Sent clear event (barge-in)")
-                                except (WebSocketDisconnect, Exception):
+                                except (WebSocketDisconnect, Exception) as exc:
+                                    logger.info("Clear event send failed: %s", exc)
                                     call_ended.set()
                                     return
 
@@ -403,6 +451,7 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                                 and sc.input_transcription
                                 and sc.input_transcription.text
                             ):
+                                logger.info("User said: %s", sc.input_transcription.text)
                                 call_session.append_user_transcript(
                                     sc.input_transcription.text
                                 )
@@ -413,14 +462,15 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                                 and sc.output_transcription
                                 and sc.output_transcription.text
                             ):
+                                logger.info("Sarah said: %s", sc.output_transcription.text)
                                 call_session.append_agent_transcript(
                                     sc.output_transcription.text
                                 )
 
                 except WebSocketDisconnect:
-                    pass
+                    logger.info("Twilio downstream: WebSocket disconnected")
                 except Exception as exc:
-                    logger.debug("Gemini downstream ended: %s", exc)
+                    logger.error("Gemini downstream error: %s", exc, exc_info=True)
 
             async def watchdog():
                 """Send wrap-up signal after 8.5 minutes."""
@@ -450,11 +500,24 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
 
             # ---- Run concurrent tasks ----
             try:
-                await asyncio.gather(
+                results = await asyncio.gather(
                     upstream_twilio(),
                     downstream_gemini(),
                     watchdog(),
                     return_exceptions=True,
+                )
+                # Log any exceptions from the tasks
+                for i, (name, result) in enumerate(
+                    zip(["upstream", "downstream", "watchdog"], results)
+                ):
+                    if isinstance(result, Exception):
+                        logger.error(
+                            "Twilio task '%s' failed: %s", name, result,
+                            exc_info=(type(result), result, result.__traceback__),
+                        )
+                logger.info(
+                    "Twilio call tasks ended (upstream_fwd=%d, downstream=%d)",
+                    upstream_forwarded, downstream_count,
                 )
             finally:
                 if call_session.watchdog_task and not call_session.watchdog_task.done():

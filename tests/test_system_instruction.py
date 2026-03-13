@@ -22,17 +22,21 @@ def system_instruction(sample_kb_content):
 
 
 class TestAIDisclosure:
-    """CALL-02: Sarah discloses she is AI in the opening and mentions call recording."""
+    """CALL-02: Sarah discloses she is AI only when asked; recording notice in opening."""
 
-    def test_ai_disclosure(self, system_instruction):
-        """System instruction contains 'I'm an AI assistant' and 'call is being recorded'."""
+    def test_ai_disclosure_when_asked(self, system_instruction):
+        """System instruction tells Sarah to disclose AI only when directly asked."""
         si = system_instruction.lower()
-        assert "i'm an ai assistant" in si or "i am an ai assistant" in si
-        assert "call is being recorded" in si or "being recorded" in si
+        assert "only when" in si or "only disclose" in si
+        assert "are you an ai" in si or "are you a real person" in si
+
+    def test_recording_notice(self, system_instruction):
+        """Opening mentions call recording."""
+        assert "being recorded" in system_instruction
 
     def test_ai_disclosure_opening(self, system_instruction):
-        """AI disclosure includes the Cloudboosta introduction."""
-        assert "Sarah from Cloudboosta" in system_instruction
+        """Opening introduces Sarah as Programme Advisor at Cloudboosta Academy."""
+        assert "Programme Advisor at Cloudboosta Academy" in system_instruction
 
 
 class TestQualificationFields:

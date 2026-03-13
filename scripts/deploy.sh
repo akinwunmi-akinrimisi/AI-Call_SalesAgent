@@ -101,6 +101,9 @@ create_secret() {
 create_secret "${SERVICE_NAME}-google-api-key" "GOOGLE_API_KEY"
 create_secret "${SERVICE_NAME}-supabase-url" "SUPABASE_URL"
 create_secret "${SERVICE_NAME}-supabase-service-key" "SUPABASE_SERVICE_KEY"
+create_secret "${SERVICE_NAME}-twilio-account-sid" "TWILIO_ACCOUNT_SID"
+create_secret "${SERVICE_NAME}-twilio-auth-token" "TWILIO_AUTH_TOKEN"
+create_secret "${SERVICE_NAME}-twilio-phone" "TWILIO_PHONE_NUMBER"
 
 # --- Step 7: Create service account (idempotent) ---
 SA_NAME="${SERVICE_NAME}-sa"
@@ -140,7 +143,7 @@ gcloud run deploy "$SERVICE_NAME" \
   --max-instances=2 \
   --memory=512Mi \
   --cpu=1 \
-  --set-secrets="GOOGLE_API_KEY=${SERVICE_NAME}-google-api-key:latest,SUPABASE_URL=${SERVICE_NAME}-supabase-url:latest,SUPABASE_SERVICE_KEY=${SERVICE_NAME}-supabase-service-key:latest" \
+  --set-secrets="GOOGLE_API_KEY=${SERVICE_NAME}-google-api-key:latest,SUPABASE_URL=${SERVICE_NAME}-supabase-url:latest,SUPABASE_SERVICE_KEY=${SERVICE_NAME}-supabase-service-key:latest,TWILIO_ACCOUNT_SID=${SERVICE_NAME}-twilio-account-sid:latest,TWILIO_AUTH_TOKEN=${SERVICE_NAME}-twilio-auth-token:latest,TWILIO_PHONE_NUMBER=${SERVICE_NAME}-twilio-phone:latest" \
   --set-env-vars="GCP_PROJECT_ID=${PROJECT_ID},GCP_REGION=${REGION},GEMINI_MODEL=${GEMINI_MODEL},GOOGLE_GENAI_USE_VERTEXAI=false" \
   --quiet
 
