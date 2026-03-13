@@ -1,15 +1,20 @@
-"""Twilio ConversationRelay handler — text-only bridge to Gemini Live API.
+"""Twilio ConversationRelay handler — text-only bridge to Gemini Chat API.
 
 ConversationRelay handles STT (caller speech → text) and TTS (text → caller audio).
-We bridge the text between ConversationRelay and Gemini Live API:
+We bridge the text between ConversationRelay and Gemini Chat API:
 
     Caller speaks → Twilio STT → {"type":"prompt","voicePrompt":"..."} → WebSocket
-    → send_client_content(text=..., turn_complete=True) → Gemini Live
-    → Gemini responds (text) → output_transcription / model_turn text
+    → chat.send_message(text) → Gemini
+    → Gemini responds (text) → response.text
     → {"type":"text","token":"...","last":true} → WebSocket → Twilio TTS → Caller hears
 
 No audio conversion needed — all text-based. Tools (update_lead_profile,
 determine_call_outcome) work identically to the voice handler.
+
+Uses the regular Gemini Chat API (not Live API) because:
+- ConversationRelay handles all audio; we only need text in/out
+- Live API output_transcription breaks after turn 1 (see cr_debug_findings.md)
+- Chat API is simpler, more reliable, and supports all Gemini models
 
 Exports:
     handle_conversation_relay: WebSocket handler for ConversationRelay protocol.
@@ -54,7 +59,6 @@ def generate_conversation_relay_twiml(lead_id: str, base_url: str) -> str:
     """
     ws_url = base_url.replace("https://", "wss://").replace("http://", "ws://")
 
-    # Build TwiML manually since the twilio SDK may not have ConversationRelay
     twiml = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<Response>"
@@ -80,10 +84,10 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
 
     Protocol flow:
     1. Twilio sends "setup" event with callSid, customParameters
-    2. We connect to Gemini Live session using lead_id
-    3. Gemini greeting is triggered via send_client_content(text="Hello")
+    2. We create a Gemini Chat session using lead_id
+    3. Gemini greeting is triggered via chat.send_message("Hello")
     4. Twilio sends "prompt" events with voicePrompt (STT text)
-    5. We forward text to Gemini via send_client_content
+    5. We forward text to Gemini via chat.send_message
     6. Gemini text responses → send back as {"type":"text","token":"..."}
     7. Handle tool calls (update_lead_profile, determine_call_outcome)
     8. Twilio sends "interrupt" when caller interrupts TTS
@@ -140,7 +144,6 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
 
         if lead is None:
             logger.error("Lead %s not found", lead_id)
-            # Send end message before closing
             await _send_json(websocket, {"type": "end"})
             return
 
@@ -155,28 +158,18 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
         await _send_json(websocket, {"type": "end"})
         return
 
-    # ---- Gemini Live session ----
-    # Only native-audio models work for Live API on v1beta.
-    # They require AUDIO modality. We extract text from output_transcription
-    # and discard the generated audio (ConversationRelay handles TTS).
-    model_name = os.getenv("CR_GEMINI_MODEL", config.gemini_model)
+    # ---- Gemini Chat session (regular API, NOT Live) ----
+    model_name = os.getenv("CR_GEMINI_MODEL", "gemini-2.5-flash")
     client = genai.Client(api_key=api_key)
 
-    live_config = types.LiveConnectConfig(
-        response_modalities=["AUDIO"],
-        system_instruction=types.Content(
-            parts=[types.Part(text=system_instruction)]
+    chat = client.aio.chats.create(
+        model=model_name,
+        config=types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            tools=TOOL_DECLARATIONS,
         ),
-        speech_config=types.SpeechConfig(
-            voice_config=types.VoiceConfig(
-                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Kore")
-            ),
-        ),
-        output_audio_transcription=types.AudioTranscriptionConfig(),
-        tools=TOOL_DECLARATIONS,
-        thinking_config=types.ThinkingConfig(thinking_budget=0),
     )
-    logger.info("CR: model=%s (audio modality, extract transcription)", model_name)
+    logger.info("CR: Gemini Chat created (model=%s, text-only)", model_name)
 
     # ---- Call session ----
     call_session = CallSession(lead_id=lead_id, lead_name=lead_name)
@@ -188,228 +181,107 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
         metadata={"call_sid": call_sid},
     ))
 
-    # ---- Streaming ----
+    # ---- Send greeting ----
     try:
-        async with client.aio.live.connect(
-            model=model_name,
-            config=live_config,
-        ) as session:
-            logger.info("Gemini Live connected (text mode) for lead=%s", lead_id)
-
-            call_ended = asyncio.Event()
-
-            # Send greeting trigger (send_realtime_input works for native-audio)
-            await session.send_realtime_input(text="Hello")
-            logger.info("ConversationRelay: greeting trigger sent to Gemini")
-
-            async def receive_from_twilio():
-                """Receive ConversationRelay messages and forward to Gemini."""
-                try:
-                    while not call_ended.is_set():
-                        raw = await websocket.receive_text()
-                        msg = json.loads(raw)
-                        msg_type = msg.get("type", "")
-
-                        if msg_type == "prompt":
-                            voice_prompt = msg.get("voicePrompt", "")
-                            if not voice_prompt.strip():
-                                continue
-
-                            logger.info("CR >>> User said: %s", voice_prompt)
-                            call_session.append_user_transcript(voice_prompt)
-
-                            # Forward text to Gemini via send_client_content
-                            # (send_realtime_input(text=) doesn't signal turn end)
-                            await session.send_client_content(
-                                turns=types.Content(
-                                    role="user",
-                                    parts=[types.Part(text=voice_prompt)],
-                                ),
-                                turn_complete=True,
-                            )
-
-                        elif msg_type == "interrupt":
-                            utterance = msg.get("utteranceUntilInterrupt", "")
-                            logger.info(
-                                "CR: caller interrupted after: %s", utterance[:80]
-                            )
-                            # Gemini will handle interruption naturally on next prompt
-
-                        elif msg_type == "dtmf":
-                            digit = msg.get("digit", "")
-                            logger.info("CR: DTMF digit: %s", digit)
-
-                        elif msg_type == "error":
-                            desc = msg.get("description", "")
-                            logger.error("CR error from Twilio: %s", desc)
-
-                        elif msg_type == "setup":
-                            # Duplicate setup, ignore
-                            pass
-
-                        else:
-                            logger.debug("CR: unknown message type: %s", msg_type)
-
-                except WebSocketDisconnect:
-                    logger.info("ConversationRelay: Twilio disconnected")
-                except Exception as exc:
-                    logger.error("CR receive error: %s", exc, exc_info=True)
-                finally:
-                    call_ended.set()
-
-            async def receive_from_gemini():
-                """Receive Gemini responses, extract text, send to ConversationRelay.
-
-                Native-audio model returns AUDIO + output_transcription.
-                We discard audio and forward transcription text to CR for TTS.
-                """
-                msg_count = 0
-                try:
-                    async for msg in session.receive():
-                        if call_ended.is_set():
-                            return
-                        msg_count += 1
-
-                        # ---- TOOL CALLS ----
-                        if msg.tool_call:
-                            responses = []
-                            for fc in msg.tool_call.function_calls:
-                                result = _handle_tool_call(
-                                    fc.name, fc.args or {}, call_session
-                                )
-                                logger.info("Tool call: %s -> %s", fc.name, result)
-                                responses.append(
-                                    types.FunctionResponse(
-                                        id=fc.id,
-                                        name=fc.name,
-                                        response=result,
-                                    )
-                                )
-                            await session.send_tool_response(
-                                function_responses=responses
-                            )
-
-                        # ---- SERVER CONTENT ----
-                        if msg.server_content:
-                            sc = msg.server_content
-
-                            # Log audio chunks (but discard — CR handles TTS)
-                            if sc.model_turn and sc.model_turn.parts:
-                                for part in sc.model_turn.parts:
-                                    if hasattr(part, "text") and part.text:
-                                        text = part.text
-                                        logger.info("CR <<< Sarah (text): %s", text[:120])
-                                        call_session.append_agent_transcript(text)
-                                        await _send_json(websocket, {
-                                            "type": "text",
-                                            "token": text,
-                                            "last": False,
-                                        })
-
-                            # Output transcription (from native-audio AUDIO modality)
-                            if (
-                                hasattr(sc, "output_transcription")
-                                and sc.output_transcription
-                                and sc.output_transcription.text
-                            ):
-                                text = sc.output_transcription.text
-                                logger.info("CR <<< Sarah (tx): %s", text[:120])
-                                call_session.append_agent_transcript(text)
-                                await _send_json(websocket, {
-                                    "type": "text",
-                                    "token": text,
-                                    "last": False,
-                                })
-
-                            # Turn complete
-                            if hasattr(sc, "turn_complete") and sc.turn_complete:
-                                logger.info("CR: turn complete (msg #%d)", msg_count)
-                                await _send_json(websocket, {
-                                    "type": "text",
-                                    "token": "",
-                                    "last": True,
-                                })
-
-                            # Interrupted
-                            if hasattr(sc, "interrupted") and sc.interrupted:
-                                logger.info("CR: Gemini interrupted")
-
-                            # Verbose log for debugging
-                            if msg_count <= 3 or msg_count % 20 == 0:
-                                has_audio = bool(
-                                    sc.model_turn and sc.model_turn.parts
-                                    and any(
-                                        hasattr(p, "inline_data") and p.inline_data
-                                        for p in sc.model_turn.parts
-                                    )
-                                )
-                                logger.info(
-                                    "CR msg #%d: audio=%s tx=%s tc=%s",
-                                    msg_count, has_audio,
-                                    bool(hasattr(sc, "output_transcription") and sc.output_transcription),
-                                    bool(hasattr(sc, "turn_complete") and sc.turn_complete),
-                                )
-
-                except WebSocketDisconnect:
-                    logger.info("CR: WebSocket disconnected during Gemini receive")
-                except Exception as exc:
-                    logger.error("CR Gemini receive error: %s", exc, exc_info=True)
-                finally:
-                    call_ended.set()
-
-            async def watchdog():
-                """Send wrap-up signal after 8.5 minutes."""
-                call_session.watchdog_task = asyncio.current_task()
-                await asyncio.sleep(WATCHDOG_SECONDS)
-                if call_ended.is_set():
-                    return
-                try:
-                    await session.send_client_content(
-                        turns=types.Content(
-                            role="user",
-                            parts=[
-                                types.Part(
-                                    text=(
-                                        "[INTERNAL SYSTEM SIGNAL - DO NOT READ ALOUD] "
-                                        "The call has reached 8.5 minutes. Begin wrapping up "
-                                        "naturally. Summarize, recommend, ask for commitment, "
-                                        "and close gracefully."
-                                    )
-                                )
-                            ],
-                        ),
-                        turn_complete=True,
-                    )
-                except Exception as exc:
-                    logger.debug("Watchdog send failed: %s", exc)
-
-            # ---- Run concurrent tasks ----
-            try:
-                results = await asyncio.gather(
-                    receive_from_twilio(),
-                    receive_from_gemini(),
-                    watchdog(),
-                    return_exceptions=True,
-                )
-                task_names = ["twilio_rx", "gemini_rx", "watchdog"]
-                for name, result in zip(task_names, results):
-                    if isinstance(result, Exception):
-                        logger.error("CR task '%s' failed: %s", name, result)
-            finally:
-                if call_session.watchdog_task and not call_session.watchdog_task.done():
-                    call_session.watchdog_task.cancel()
-                    try:
-                        await call_session.watchdog_task
-                    except asyncio.CancelledError:
-                        pass
-
+        await _gemini_send_and_respond(chat, "Hello", call_session, websocket)
     except Exception as exc:
-        logger.error(
-            "Gemini session failed for CR call (lead=%s): %s",
-            lead_id, exc, exc_info=True,
-        )
+        logger.error("CR: greeting failed: %s", exc, exc_info=True)
+        await _send_json(websocket, {"type": "end"})
+        return
 
+    # ---- Message loop + watchdog ----
+    call_ended = asyncio.Event()
+    chat_lock = asyncio.Lock()
+
+    async def message_loop():
+        """Receive ConversationRelay messages and forward to Gemini."""
+        try:
+            while not call_ended.is_set():
+                raw = await websocket.receive_text()
+                msg = json.loads(raw)
+                msg_type = msg.get("type", "")
+
+                if msg_type == "prompt":
+                    voice_prompt = msg.get("voicePrompt", "")
+                    if not voice_prompt.strip():
+                        continue
+
+                    logger.info("CR >>> User said: %s", voice_prompt)
+                    call_session.append_user_transcript(voice_prompt)
+
+                    async with chat_lock:
+                        await _gemini_send_and_respond(
+                            chat, voice_prompt, call_session, websocket
+                        )
+
+                elif msg_type == "interrupt":
+                    utterance = msg.get("utteranceUntilInterrupt", "")
+                    logger.info(
+                        "CR: caller interrupted after: %s", utterance[:80]
+                    )
+
+                elif msg_type == "dtmf":
+                    digit = msg.get("digit", "")
+                    logger.info("CR: DTMF digit: %s", digit)
+
+                elif msg_type == "error":
+                    desc = msg.get("description", "")
+                    logger.error("CR error from Twilio: %s", desc)
+
+                elif msg_type == "setup":
+                    pass  # Duplicate setup, ignore
+
+                else:
+                    logger.debug("CR: unknown message type: %s", msg_type)
+
+        except WebSocketDisconnect:
+            logger.info("ConversationRelay: Twilio disconnected")
+        except Exception as exc:
+            logger.error("CR receive error: %s", exc, exc_info=True)
+        finally:
+            call_ended.set()
+
+    async def watchdog():
+        """Send wrap-up signal after 8.5 minutes."""
+        call_session.watchdog_task = asyncio.current_task()
+        await asyncio.sleep(WATCHDOG_SECONDS)
+        if call_ended.is_set():
+            return
+        try:
+            async with chat_lock:
+                await _gemini_send_and_respond(
+                    chat,
+                    (
+                        "[INTERNAL SYSTEM SIGNAL - DO NOT READ ALOUD] "
+                        "The call has reached 8.5 minutes. Begin wrapping up "
+                        "naturally. Summarize, recommend, ask for commitment, "
+                        "and close gracefully."
+                    ),
+                    call_session,
+                    websocket,
+                )
+        except Exception as exc:
+            logger.debug("Watchdog send failed: %s", exc)
+
+    # ---- Run concurrent tasks ----
+    try:
+        results = await asyncio.gather(
+            message_loop(),
+            watchdog(),
+            return_exceptions=True,
+        )
+        task_names = ["twilio_rx", "watchdog"]
+        for name, result in zip(task_names, results):
+            if isinstance(result, Exception):
+                logger.error("CR task '%s' failed: %s", name, result)
     finally:
+        if call_session.watchdog_task and not call_session.watchdog_task.done():
+            call_session.watchdog_task.cancel()
+            try:
+                await call_session.watchdog_task
+            except asyncio.CancelledError:
+                pass
+
         await process_call_end(call_session)
 
         duration = int(call_session.elapsed_seconds)
@@ -422,6 +294,79 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
                 "call_sid": call_sid,
             },
         )
+
+
+async def _gemini_send_and_respond(
+    chat, text: str, call_session: CallSession, websocket: WebSocket
+) -> None:
+    """Send text to Gemini Chat, handle tool calls, send response to CR.
+
+    Loops to handle chained tool calls: model may return function calls,
+    we execute them and send results back, until we get a text response.
+    """
+    response = await chat.send_message(text)
+
+    max_tool_rounds = 5  # Safety limit to prevent infinite loops
+    for _ in range(max_tool_rounds):
+        # Check for function calls
+        function_calls = _extract_function_calls(response)
+        if not function_calls:
+            break
+
+        # Execute each tool call
+        fr_parts = []
+        for fc in function_calls:
+            result = _handle_tool_call(fc.name, fc.args or {}, call_session)
+            logger.info("CR tool call: %s -> %s", fc.name, result)
+            fr_parts.append(
+                types.Part(
+                    function_response=types.FunctionResponse(
+                        name=fc.name,
+                        response=result,
+                    )
+                )
+            )
+
+        # Send function responses back to Gemini
+        response = await chat.send_message(fr_parts)
+
+    # Extract text and send to ConversationRelay
+    try:
+        text_response = response.text
+    except (ValueError, AttributeError):
+        text_response = None
+
+    if text_response:
+        logger.info("CR <<< Sarah: %s", text_response[:200])
+        call_session.append_agent_transcript(text_response)
+        await _send_json(websocket, {
+            "type": "text",
+            "token": text_response,
+            "last": True,
+        })
+    else:
+        logger.warning("CR: Gemini returned no text after tool calls")
+        # Send empty last token to signal turn complete
+        await _send_json(websocket, {
+            "type": "text",
+            "token": "",
+            "last": True,
+        })
+
+
+def _extract_function_calls(response) -> list:
+    """Extract FunctionCall objects from a GenerateContentResponse."""
+    calls = []
+    try:
+        if response.candidates:
+            for candidate in response.candidates:
+                if candidate.content and candidate.content.parts:
+                    for part in candidate.content.parts:
+                        if hasattr(part, "function_call") and part.function_call:
+                            calls.append(part.function_call)
+    except Exception as exc:
+        logger.warning("CR: failed to extract function calls: %s", exc)
+    return calls
 
 
 async def _send_json(websocket: WebSocket, data: dict) -> bool:
