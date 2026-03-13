@@ -1,7 +1,16 @@
 """FastAPI server for Cloudboosta Voice Agent (System B)."""
 
 import logging
+import sys
 from pathlib import Path
+
+# Configure root logger so all module loggers (twilio_handler, voice_handler, etc.)
+# write to stderr which Cloud Run captures and displays.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    stream=sys.stderr,
+)
 
 import httpx
 from fastapi import FastAPI, Request, WebSocket

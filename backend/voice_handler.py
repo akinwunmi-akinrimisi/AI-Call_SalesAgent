@@ -306,7 +306,7 @@ async def handle_voice_session(websocket: WebSocket, lead_id: str) -> None:
         ),
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
-                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Aoede")
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Kore")
             ),
         ),
         input_audio_transcription=types.AudioTranscriptionConfig(),
