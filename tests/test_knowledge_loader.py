@@ -8,6 +8,18 @@ Covers:
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _clear_kb_cache():
+    """Clear the KB module-level cache before each test."""
+    import knowledge_loader
+
+    knowledge_loader._kb_cache = None
+    knowledge_loader._kb_cache_time = 0.0
+    yield
+    knowledge_loader._kb_cache = None
+    knowledge_loader._kb_cache_time = 0.0
+
+
 class TestLoadKnowledgeBase:
     """Tests for load_knowledge_base() function."""
 

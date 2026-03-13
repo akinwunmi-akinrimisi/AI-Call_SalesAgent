@@ -117,6 +117,7 @@ def _setup_mock_google_modules():
     if "google.genai" not in sys.modules:
         genai_mod = builtin_types.ModuleType("google.genai")
         genai_mod.__path__ = []
+        genai_mod.Client = MagicMock
         sys.modules["google.genai"] = genai_mod
 
     # google.genai.types
@@ -129,6 +130,11 @@ def _setup_mock_google_modules():
         genai_types_mod.VoiceConfig = MagicMock
         genai_types_mod.PrebuiltVoiceConfig = MagicMock
         genai_types_mod.AudioTranscriptionConfig = MagicMock
+        genai_types_mod.Tool = MagicMock
+        genai_types_mod.FunctionDeclaration = MagicMock
+        genai_types_mod.FunctionResponse = MagicMock
+        genai_types_mod.LiveConnectConfig = MagicMock
+        genai_types_mod.ThinkingConfig = MagicMock
         sys.modules["google.genai.types"] = genai_types_mod
 
 

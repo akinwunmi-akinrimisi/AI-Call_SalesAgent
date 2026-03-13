@@ -24,7 +24,7 @@ def test_create_agent_uses_correct_model():
 
     instruction = "You are Sarah, a test agent."
     agent = create_sarah_agent(instruction)
-    assert agent.model == "gemini-live-2.5-flash-native-audio"
+    assert agent.model == "gemini-2.5-flash-native-audio-latest"
 
 
 def test_agent_has_two_tools():

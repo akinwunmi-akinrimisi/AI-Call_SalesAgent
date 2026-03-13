@@ -191,9 +191,10 @@ class TestSupabaseLeadUpdate:
             assert "leads" in call_args[0][0]
             assert "test-lead-uuid-1234" in call_args[0][0]
 
-            # Verify Content-Profile header
+            # Verify auth headers
             headers = call_args[1].get("headers", call_args.kwargs.get("headers", {}))
-            assert headers.get("Content-Profile") == "sales_agent"
+            assert "apikey" in headers
+            assert headers.get("Content-Type") == "application/json"
 
 
 class TestSupabaseCallLogWrite:
@@ -236,9 +237,10 @@ class TestSupabaseCallLogWrite:
             # Verify URL targets call_logs
             assert "call_logs" in call_args[0][0]
 
-            # Verify Content-Profile header
+            # Verify auth headers
             headers = call_args[1].get("headers", call_args.kwargs.get("headers", {}))
-            assert headers.get("Content-Profile") == "sales_agent"
+            assert "apikey" in headers
+            assert headers.get("Content-Type") == "application/json"
 
             # Verify return value is the created call_log id
             assert result == "new-call-log-uuid"
