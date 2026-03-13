@@ -475,7 +475,11 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
         tools=TOOL_DECLARATIONS,
         realtime_input_config=types.RealtimeInputConfig(
             automatic_activity_detection=types.AutomaticActivityDetection(
-                disabled=True,  # Manual VAD: we send activity_start/end ourselves
+                disabled=False,
+                start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
+                prefix_padding_ms=20,
+                silence_duration_ms=300,
             ),
         ),
     )
@@ -503,18 +507,9 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
         ) as session:
             logger.info("Gemini Live connected for Twilio call (lead=%s)", lead_id)
 
-            # Trigger Sarah's greeting via send_client_content.
-            # With manual VAD (disabled=True), send_realtime_input(text=)
-            # never gets "committed" because there's no activity_end.
-            # send_client_content with turn_complete=True works independently.
-            await session.send_client_content(
-                turns=types.Content(
-                    role="user",
-                    parts=[types.Part(text="Hello")],
-                ),
-                turn_complete=True,
-            )
-            logger.info("Sent greeting trigger via send_client_content(turn_complete=True)")
+            # Trigger Sarah's greeting
+            await session.send_realtime_input(text="Hello")
+            logger.info("Sent greeting trigger via send_realtime_input(text)")
 
             # Track whether Sarah is currently speaking (for interruption detection)
             sarah_speaking = asyncio.Event()
@@ -549,14 +544,11 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                     call_ended.set()
 
             async def upstream_from_monitor():
-                """Read real audio from inbound monitor, resample to 16kHz,
-                send to Gemini with MANUAL VAD signaling.
+                """Read real audio from inbound monitor, resample to 16kHz
+                via soxr, send to Gemini. Auto VAD handles speech detection.
 
-                Automatic VAD is disabled. We detect speech from RMS and
-                send activity_start/activity_end signals ourselves. This
-                bypasses Gemini's VAD which fails on telephony audio.
-
-                Also saves debug audio to /tmp/debug_inbound.raw.
+                Saves debug audio to /tmp/debug_inbound.raw and logs every
+                speech chunk for diagnosis.
                 """
                 nonlocal upstream_forwarded
 
@@ -574,16 +566,10 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
 
                 logger.info("Upstream: connected to inbound monitor queue (callSid=%s)", call_sid)
 
-                # Manual VAD state
-                SPEECH_RMS_THRESHOLD = 200  # RMS above this = speech
-                SILENCE_CHUNKS_FOR_END = 15  # 15 × 20ms = 300ms of silence → end of speech
-                is_speaking = False
-                silence_counter = 0
-
-                # Debug: save audio to file (start capturing after greeting)
+                # Debug: save audio to file
                 debug_file = open("/tmp/debug_inbound.raw", "wb")
                 debug_bytes_written = 0
-                DEBUG_MAX_BYTES = 16000 * 2 * 10  # 10s at 16kHz 16-bit
+                DEBUG_MAX_BYTES = 16000 * 2 * 15  # 15s at 16kHz 16-bit
 
                 try:
                     while not call_ended.is_set():
@@ -597,22 +583,15 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                                 logger.info("Inbound monitor ended (pre-gate)")
                                 call_ended.set()
                                 return
-                            # Discard pre-greeting audio
                             continue
 
-                        # Read from queue — one chunk at a time for low latency
+                        # Read from queue
                         try:
                             mulaw_bytes = await asyncio.wait_for(queue.get(), timeout=1.0)
                         except asyncio.TimeoutError:
                             continue
                         if mulaw_bytes is None:
                             logger.info("Inbound monitor ended")
-                            # Send final activity_end if still speaking
-                            if is_speaking:
-                                await session.send_realtime_input(
-                                    activity_end=types.ActivityEnd()
-                                )
-                                logger.info("Manual VAD: activity_end (stream ended)")
                             call_ended.set()
                             return
 
@@ -631,40 +610,15 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                             debug_bytes_written += len(pcm_16k)
                             if debug_bytes_written >= DEBUG_MAX_BYTES and not debug_file.closed:
                                 debug_file.close()
-                                logger.info("Debug audio saved: /tmp/debug_inbound.raw (%d bytes)", debug_bytes_written)
+                                logger.info("Debug audio: %d bytes saved", debug_bytes_written)
 
-                        # ---- Manual VAD: detect speech from RMS ----
-                        if chunk_rms >= SPEECH_RMS_THRESHOLD:
-                            silence_counter = 0
-                            if not is_speaking:
-                                is_speaking = True
-                                await session.send_realtime_input(
-                                    activity_start=types.ActivityStart()
-                                )
-                                logger.info(
-                                    "Manual VAD: activity_start (rms=%d)",
-                                    chunk_rms,
-                                )
-                        else:
-                            if is_speaking:
-                                silence_counter += 1
-                                if silence_counter >= SILENCE_CHUNKS_FOR_END:
-                                    is_speaking = False
-                                    await session.send_realtime_input(
-                                        activity_end=types.ActivityEnd()
-                                    )
-                                    logger.info(
-                                        "Manual VAD: activity_end (silence %dms)",
-                                        silence_counter * 20,
-                                    )
-                                    silence_counter = 0
-
-                        # Send audio to Gemini (every chunk, 20ms = 640 bytes)
+                        # Send audio to Gemini (20ms = 640 bytes at 16kHz)
                         upstream_forwarded += 1
-                        if upstream_forwarded <= 5 or chunk_rms >= SPEECH_RMS_THRESHOLD or upstream_forwarded % 200 == 0:
+                        # Log every speech chunk + periodic silence
+                        if chunk_rms > 100 or upstream_forwarded <= 5 or upstream_forwarded % 200 == 0:
                             logger.info(
-                                "Upstream #%d: %d bytes rms=%d speaking=%s",
-                                upstream_forwarded, len(pcm_16k), chunk_rms, is_speaking,
+                                "Upstream #%d: %d bytes rms=%d",
+                                upstream_forwarded, len(pcm_16k), chunk_rms,
                             )
 
                         await session.send_realtime_input(
