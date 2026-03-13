@@ -48,16 +48,15 @@ logger = logging.getLogger(__name__)
 
 # ---- Audio Conversion ----
 
-def mulaw_to_pcm16k(mulaw_bytes: bytes) -> bytes:
+def mulaw_to_pcm16k(mulaw_bytes: bytes, ratecv_state=None):
     """Convert mulaw 8kHz → PCM16 16kHz for Gemini input.
 
-    Uses audioop.ratecv for resampling (simpler and more reliable than
-    numpy/soxr chain which can introduce audio artifacts that confuse
-    Gemini's VAD).
+    Returns (pcm_bytes, new_state). Pass state between calls for
+    continuous resampling without discontinuities at chunk boundaries.
     """
     pcm_8k = audioop.ulaw2lin(mulaw_bytes, 2)
-    pcm_16k, _ = audioop.ratecv(pcm_8k, 2, 1, 8000, 16000, None)
-    return pcm_16k
+    pcm_16k, new_state = audioop.ratecv(pcm_8k, 2, 1, 8000, 16000, ratecv_state)
+    return pcm_16k, new_state
 
 
 def pcm24k_to_mulaw8k(pcm_bytes: bytes) -> bytes:
@@ -280,16 +279,24 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
             sarah_speaking = asyncio.Event()
             call_ended = asyncio.Event()
 
+            # Gate: don't forward user audio until Sarah's greeting
+            # finishes (turn_complete). Sending phone audio during the
+            # greeting causes echo (phone mic picks up Sarah's voice)
+            # which confuses Gemini's VAD and prevents it from responding.
+            greeting_done = asyncio.Event()
             upstream_forwarded = 0
+            upstream_discarded = 0
+
+            # Buffer 5 Twilio chunks (~100ms) and send as one batch.
+            # Reduces send rate from 50/sec to 10/sec, matching browser.
+            UPSTREAM_BUFFER_CHUNKS = 5
 
             async def upstream_twilio():
-                """Receive mulaw audio from Twilio → convert → send to Gemini.
-
-                Sends each chunk immediately (no buffering, no gating) —
-                matching the browser handler pattern which works reliably.
-                Gemini's own VAD handles barge-in detection.
-                """
-                nonlocal upstream_forwarded
+                """Receive mulaw from Twilio → gate → buffer → convert → Gemini."""
+                nonlocal upstream_forwarded, upstream_discarded
+                mulaw_buffer = bytearray()
+                chunk_count = 0
+                ratecv_state = None  # preserve resampling state across batches
                 try:
                     while not call_ended.is_set():
                         raw = await websocket.receive_text()
@@ -297,35 +304,57 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                         event = msg.get("event")
 
                         if event == "media":
+                            # Discard all audio until greeting finishes
+                            if not greeting_done.is_set():
+                                upstream_discarded += 1
+                                continue
+
                             payload = msg["media"]["payload"]
-                            mulaw_bytes = base64.b64decode(payload)
-                            pcm_16k = mulaw_to_pcm16k(mulaw_bytes)
+                            mulaw_buffer.extend(base64.b64decode(payload))
+                            chunk_count += 1
 
-                            upstream_forwarded += 1
-                            if upstream_forwarded <= 3 or upstream_forwarded % 500 == 0:
-                                logger.info(
-                                    "Twilio upstream #%d: %d mulaw → %d pcm16k bytes",
-                                    upstream_forwarded, len(mulaw_bytes), len(pcm_16k),
+                            if chunk_count >= UPSTREAM_BUFFER_CHUNKS:
+                                pcm_16k, ratecv_state = mulaw_to_pcm16k(
+                                    bytes(mulaw_buffer), ratecv_state
                                 )
-
-                            await session.send_realtime_input(
-                                media=types.Blob(
-                                    mime_type="audio/pcm;rate=16000",
-                                    data=pcm_16k,
+                                upstream_forwarded += 1
+                                if upstream_forwarded <= 3 or upstream_forwarded % 100 == 0:
+                                    logger.info(
+                                        "Twilio upstream batch #%d: %d pcm16k "
+                                        "(discarded %d during greeting)",
+                                        upstream_forwarded, len(pcm_16k),
+                                        upstream_discarded,
+                                    )
+                                await session.send_realtime_input(
+                                    media=types.Blob(
+                                        mime_type="audio/pcm;rate=16000",
+                                        data=pcm_16k,
+                                    )
                                 )
-                            )
+                                mulaw_buffer.clear()
+                                chunk_count = 0
 
                         elif event == "stop":
-                            logger.info("Twilio stream stopped (forwarded=%d)",
-                                        upstream_forwarded)
+                            # Flush remaining buffer
+                            if mulaw_buffer:
+                                pcm_16k, _ = mulaw_to_pcm16k(
+                                    bytes(mulaw_buffer), ratecv_state
+                                )
+                                await session.send_realtime_input(
+                                    media=types.Blob(
+                                        mime_type="audio/pcm;rate=16000",
+                                        data=pcm_16k,
+                                    )
+                                )
+                            logger.info(
+                                "Twilio stream stopped (fwd=%d, discarded=%d)",
+                                upstream_forwarded, upstream_discarded,
+                            )
                             call_ended.set()
                             return
 
-                        elif event == "mark":
-                            logger.debug("Twilio mark event: %s", msg.get("mark", {}))
-
                 except WebSocketDisconnect:
-                    logger.info("Twilio WebSocket disconnected (upstream, forwarded=%d)",
+                    logger.info("Twilio WebSocket disconnected (upstream, fwd=%d)",
                                 upstream_forwarded)
                     call_ended.set()
                 except Exception as exc:
@@ -414,6 +443,14 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                                 logger.info("Sarah turn complete (was_speaking=%s)", was_speaking)
                                 was_speaking = False
                                 sarah_speaking.clear()
+                                # Ungate upstream audio now that greeting is done
+                                if not greeting_done.is_set():
+                                    greeting_done.set()
+                                    logger.info(
+                                        "Greeting done, upstream ungated "
+                                        "(discarded %d chunks during greeting)",
+                                        upstream_discarded,
+                                    )
 
                             # Interruption: Gemini detected user barge-in
                             if hasattr(sc, "interrupted") and sc.interrupted:
