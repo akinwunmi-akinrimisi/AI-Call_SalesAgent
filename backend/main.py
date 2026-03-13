@@ -22,6 +22,10 @@ from config import config
 from voice_handler import handle_voice_session
 from minimal_test import handle_minimal_test, handle_minimal_twilio, handle_manual_vad_twilio
 import twilio_handler
+from conversation_relay_handler import (
+    handle_conversation_relay,
+    generate_conversation_relay_twiml,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -350,6 +354,31 @@ async def twilio_status(request: Request):
     )
 
     return {"status": "ok"}
+
+
+# ---- ConversationRelay Integration ----
+
+
+@app.api_route("/twilio/conversation-relay", methods=["GET", "POST"])
+async def twilio_conversation_relay_voice(request: Request):
+    """TwiML webhook — returns ConversationRelay connection instructions.
+
+    Point Twilio webhook here for ConversationRelay-based calls.
+    Twilio handles STT/TTS; we bridge text to Gemini Live API.
+    """
+    lead_id = request.query_params.get("lead_id", "")
+    base_url = str(request.base_url).rstrip("/")
+    base_url = base_url.replace("http://", "https://")
+    twiml = generate_conversation_relay_twiml(lead_id, base_url)
+    logger.info("ConversationRelay TwiML: %s", twiml)
+    return Response(content=twiml, media_type="application/xml")
+
+
+@app.websocket("/ws/conversation-relay")
+async def conversation_relay_ws(websocket: WebSocket):
+    """ConversationRelay WebSocket — bridges Twilio STT/TTS with Gemini Live."""
+    await handle_conversation_relay(websocket)
+
 
 # --- Serve frontend static files (production) ---
 _static_dir = Path(__file__).parent / "static"

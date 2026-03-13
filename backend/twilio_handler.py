@@ -98,7 +98,8 @@ async def initiate_call(lead_id: str, to_number: str, base_url: str) -> dict:
     """
     client = get_twilio_client()
 
-    twiml_url = f"{base_url}/twilio/voice?lead_id={lead_id}"
+    # Use ConversationRelay (text-based bridge to Gemini Live)
+    twiml_url = f"{base_url}/twilio/conversation-relay?lead_id={lead_id}"
 
     # Run synchronous Twilio SDK call in thread pool
     call = await asyncio.to_thread(
