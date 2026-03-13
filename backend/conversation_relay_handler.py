@@ -155,14 +155,13 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
         await _send_json(websocket, {"type": "end"})
         return
 
-    # ---- Gemini Live session (TEXT only) ----
+    # ---- Gemini Live session ----
     client = genai.Client(api_key=api_key)
 
-    # ConversationRelay needs TEXT modality (Twilio handles TTS).
-    # Use CR_GEMINI_MODEL env var, or fall back to gemini-2.0-flash-live-001
-    # which supports TEXT output on the Live API. Native-audio models don't
-    # reliably produce output_transcription after the first turn.
-    model_name = os.getenv("CR_GEMINI_MODEL", "gemini-2.0-flash-live-001")
+    # ConversationRelay needs TEXT output (Twilio handles TTS).
+    # On v1beta, only native-audio models support bidiGenerateContent.
+    # Use CR_GEMINI_MODEL env var to override.
+    model_name = os.getenv("CR_GEMINI_MODEL", config.gemini_model)
 
     live_config = types.LiveConnectConfig(
         response_modalities=["TEXT"],
