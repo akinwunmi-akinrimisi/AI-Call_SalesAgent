@@ -37,6 +37,7 @@ PDF_MAP: dict[str, str] = {
     "faqs": "faqs.pdf",
     "payment-details": "payment-details.pdf",
     "objection-handling": "objection-handling.pdf",
+    "coming-soon": "coming-soon.pdf",
 }
 
 # Manually curated keywords per document
@@ -78,6 +79,13 @@ KEYWORDS: dict[str, list[str]] = {
         "job outcomes",
         "beginner concerns",
         "ROI",
+    ],
+    "coming-soon": [
+        "future programmes",
+        "cloud security specialisation",
+        "DevSecOps",
+        "data engineering",
+        "notification list",
     ],
 }
 
