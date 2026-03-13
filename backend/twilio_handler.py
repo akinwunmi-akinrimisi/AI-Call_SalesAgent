@@ -328,7 +328,7 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                                 )
                                 upstream_forwarded += 1
                                 rms = audioop.rms(pcm_16k, 2)
-                                if upstream_forwarded <= 5 or upstream_forwarded % 50 == 0:
+                                if upstream_forwarded <= 10 or upstream_forwarded % 20 == 0:
                                     logger.info(
                                         "Twilio upstream batch #%d: %d bytes "
                                         "rms=%d (discarded %d during greeting)",
@@ -461,6 +461,15 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                                         "(discarded %d chunks during greeting)",
                                         upstream_discarded,
                                     )
+                                    # Nudge Gemini to listen for realtime audio
+                                    # after the text-triggered greeting exchange
+                                    try:
+                                        await session.send_realtime_input(
+                                            text="[listening]"
+                                        )
+                                        logger.info("Sent realtime text nudge")
+                                    except Exception as exc:
+                                        logger.warning("Realtime text nudge failed: %s", exc)
 
                             # Interruption: Gemini detected user barge-in
                             if hasattr(sc, "interrupted") and sc.interrupted:
