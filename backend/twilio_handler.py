@@ -5,7 +5,7 @@ Handles outbound call initiation, TwiML generation, Media Streams
 WebSocket protocol, and interruption handling via clear events.
 
 Audio conversion chain:
-  Twilio (mulaw 8kHz) → PCM 16kHz → Gemini Live API input
+  Twilio (mulaw 8kHz) → PCM 8kHz → soxr resample → PCM 16kHz → Gemini Live API
   Gemini output (PCM 24kHz) → mulaw 8kHz → Twilio playback
 
 Exports:
@@ -24,6 +24,8 @@ import os
 import time
 
 import audioop
+import numpy as np
+import soxr
 from fastapi import WebSocket, WebSocketDisconnect
 from google import genai
 from google.genai import types
@@ -45,18 +47,26 @@ from voice_handler import (
 
 logger = logging.getLogger(__name__)
 
+# Shared inbound audio queues keyed by callSid.
+# The <Start><Stream> one-way handler pushes audio here;
+# the <Connect><Stream> bidirectional handler reads from here.
+_inbound_queues: dict[str, asyncio.Queue] = {}
+
 
 # ---- Audio Conversion ----
 
 def mulaw_to_pcm16k(mulaw_bytes: bytes, ratecv_state=None):
     """Convert mulaw 8kHz → PCM16 16kHz for Gemini input.
 
-    Returns (pcm_bytes, new_state). Pass state between calls for
-    continuous resampling without discontinuities at chunk boundaries.
+    Uses soxr for high-quality resampling (matching Google's official
+    reference implementation). The ratecv_state parameter is kept for
+    API compatibility but is ignored — soxr handles state internally.
     """
     pcm_8k = audioop.ulaw2lin(mulaw_bytes, 2)
-    pcm_16k, new_state = audioop.ratecv(pcm_8k, 2, 1, 8000, 16000, ratecv_state)
-    return pcm_16k, new_state
+    samples_8k = np.frombuffer(pcm_8k, dtype=np.int16).astype(np.float64)
+    samples_16k = soxr.resample(samples_8k, 8000, 16000)
+    pcm_16k = samples_16k.astype(np.int16).tobytes()
+    return pcm_16k, None
 
 
 def pcm24k_to_mulaw8k(pcm_bytes: bytes) -> bytes:
@@ -113,7 +123,13 @@ async def initiate_call(lead_id: str, to_number: str, base_url: str) -> dict:
 
 
 def generate_twiml(lead_id: str, base_url: str) -> str:
-    """Generate TwiML XML that connects to Media Streams.
+    """Generate TwiML XML with hybrid dual-stream architecture.
+
+    Uses two streams to work around Twilio's bidirectional stream
+    silencing inbound audio when outbound audio is being sent:
+
+    1. <Start><Stream> (one-way monitor) — reliably receives caller audio
+    2. <Connect><Stream> (bidirectional) — sends Gemini audio to caller
 
     Args:
         lead_id: UUID of the lead (passed as stream parameter).
@@ -123,16 +139,232 @@ def generate_twiml(lead_id: str, base_url: str) -> str:
         TwiML XML string.
     """
     response = VoiceResponse()
-    connect = Connect()
-
     ws_url = base_url.replace("https://", "wss://").replace("http://", "ws://")
+
+    # 1. One-way monitor — receives real inbound audio
+    response.start().stream(
+        url=f"{ws_url}/ws/twilio/inbound",
+        track="inbound_track",
+        name="inbound_monitor",
+    )
+
+    # 2. Bidirectional — for sending Gemini audio back to caller
+    connect = Connect()
     stream = Stream(url=f"{ws_url}/ws/twilio/stream")
     stream.parameter(name="lead_id", value=lead_id)
-
     connect.append(stream)
     response.append(connect)
 
     return str(response)
+
+
+def generate_diagnostic_twiml(base_url: str, mode: str = "oneway") -> str:
+    """Generate TwiML for stream diagnostics.
+
+    Modes:
+      oneway — <Start><Stream> monitor + <Say> + <Gather>
+      bidir_silent — <Connect><Stream> bidirectional, handler receives only
+      bidir_hybrid — <Start><Stream> for inbound + <Connect><Stream> for outbound
+    """
+    response = VoiceResponse()
+    ws_url = base_url.replace("https://", "wss://").replace("http://", "ws://")
+
+    if mode == "bidir_silent":
+        # Bidirectional stream but handler will NOT send audio back.
+        # Tests if bidirectional setup itself silences inbound.
+        connect = Connect()
+        stream = Stream(url=f"{ws_url}/ws/twilio/diagnostic")
+        connect.append(stream)
+        response.append(connect)
+
+    elif mode == "bidir_hybrid":
+        # One-way monitor for inbound audio + bidirectional for sending
+        # Gemini audio back. Two separate WebSocket connections.
+        response.start().stream(
+            url=f"{ws_url}/ws/twilio/diagnostic",
+            track="inbound_track",
+            name="inbound_monitor",
+        )
+        connect = Connect()
+        stream = Stream(url=f"{ws_url}/ws/twilio/stream")
+        stream.parameter(name="lead_id", value="9c793b38-65ce-422f-8571-718b34541fe6")
+        connect.append(stream)
+        response.append(connect)
+
+    else:  # oneway
+        response.start().stream(
+            url=f"{ws_url}/ws/twilio/diagnostic",
+            track="inbound_track",
+        )
+        from twilio.twiml.voice_response import Gather
+        gather = Gather(
+            input="speech", timeout=30,
+            action=f"{base_url}/twilio/diagnostic-done",
+        )
+        gather.say(
+            "This is a diagnostic test. Please speak now. "
+            "Say anything for about ten seconds.",
+            voice="Polly.Amy",
+        )
+        response.append(gather)
+        response.say("Thank you. Diagnostic complete.", voice="Polly.Amy")
+
+    return str(response)
+
+
+async def handle_diagnostic_stream(websocket: WebSocket) -> None:
+    """Lightweight WebSocket handler for one-way stream diagnostic.
+
+    Logs raw mulaw bytes and RMS for every chunk to determine if
+    Twilio sends real audio in one-way monitor mode.
+    """
+    await websocket.accept()
+    logger.info("DIAGNOSTIC: WebSocket connected")
+
+    chunk_count = 0
+    non_silence_count = 0
+
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            msg = json.loads(raw)
+            event = msg.get("event")
+
+            if event == "connected":
+                logger.info("DIAGNOSTIC: protocol=%s", msg.get("protocol"))
+                continue
+
+            if event == "start":
+                start_data = msg.get("start", {})
+                logger.info(
+                    "DIAGNOSTIC: stream started sid=%s track=%s",
+                    start_data.get("streamSid"),
+                    start_data.get("tracks", []),
+                )
+                continue
+
+            if event == "media":
+                chunk_count += 1
+                media_data = msg.get("media", {})
+                payload = media_data.get("payload", "")
+                mulaw_bytes = base64.b64decode(payload)
+                pcm = audioop.ulaw2lin(mulaw_bytes, 2)
+                rms = audioop.rms(pcm, 2)
+
+                if rms > 50:
+                    non_silence_count += 1
+
+                # Log every chunk for first 20, then every 50th
+                if chunk_count <= 20 or chunk_count % 50 == 0:
+                    sample_hex = mulaw_bytes[:8].hex()
+                    logger.info(
+                        "DIAGNOSTIC chunk #%d: len=%d rms=%d "
+                        "track=%s first_bytes=%s (non_silence=%d/%d)",
+                        chunk_count, len(mulaw_bytes), rms,
+                        media_data.get("track", "?"), sample_hex,
+                        non_silence_count, chunk_count,
+                    )
+
+            elif event == "stop":
+                logger.info(
+                    "DIAGNOSTIC: stream stopped. "
+                    "total_chunks=%d non_silence=%d",
+                    chunk_count, non_silence_count,
+                )
+                break
+
+    except WebSocketDisconnect:
+        logger.info(
+            "DIAGNOSTIC: disconnected. chunks=%d non_silence=%d",
+            chunk_count, non_silence_count,
+        )
+    except Exception as exc:
+        logger.error("DIAGNOSTIC error: %s", exc, exc_info=True)
+
+
+# ---- Inbound Audio Monitor (one-way <Start><Stream>) ----
+
+async def handle_inbound_monitor(websocket: WebSocket) -> None:
+    """Handle one-way <Start><Stream> that receives real caller audio.
+
+    Pushes decoded mulaw bytes into _inbound_queues[callSid] for the
+    bidirectional handler to read and forward to Gemini.
+    """
+    await websocket.accept()
+    logger.info("Inbound monitor: WebSocket connected")
+
+    call_sid: str | None = None
+    chunk_count = 0
+    non_silence = 0
+
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            msg = json.loads(raw)
+            event = msg.get("event")
+
+            if event == "connected":
+                logger.info("Inbound monitor: protocol=%s", msg.get("protocol"))
+                continue
+
+            if event == "start":
+                start_data = msg.get("start", {})
+                call_sid = start_data.get("callSid")
+                # Create queue for this call
+                _inbound_queues[call_sid] = asyncio.Queue(maxsize=500)
+                logger.info(
+                    "Inbound monitor started: callSid=%s sid=%s",
+                    call_sid, start_data.get("streamSid"),
+                )
+                continue
+
+            if event == "media":
+                if not call_sid:
+                    continue
+                chunk_count += 1
+                media_data = msg.get("media", {})
+                payload = media_data.get("payload", "")
+                mulaw_bytes = base64.b64decode(payload)
+
+                # Push raw mulaw to shared queue (non-blocking)
+                queue = _inbound_queues.get(call_sid)
+                if queue:
+                    try:
+                        queue.put_nowait(mulaw_bytes)
+                    except asyncio.QueueFull:
+                        pass  # Drop oldest if overwhelmed
+
+                # Periodic logging
+                pcm = audioop.ulaw2lin(mulaw_bytes, 2)
+                rms = audioop.rms(pcm, 2)
+                if rms > 50:
+                    non_silence += 1
+                if chunk_count <= 5 or chunk_count % 100 == 0:
+                    logger.info(
+                        "Inbound monitor #%d: rms=%d non_silence=%d/%d",
+                        chunk_count, rms, non_silence, chunk_count,
+                    )
+
+            elif event == "stop":
+                logger.info(
+                    "Inbound monitor stopped: chunks=%d non_silence=%d",
+                    chunk_count, non_silence,
+                )
+                # Signal end to the queue consumer
+                if call_sid and call_sid in _inbound_queues:
+                    await _inbound_queues[call_sid].put(None)
+                break
+
+    except WebSocketDisconnect:
+        logger.info("Inbound monitor disconnected: chunks=%d", chunk_count)
+    except Exception as exc:
+        logger.error("Inbound monitor error: %s", exc, exc_info=True)
+    finally:
+        # Clean up queue after a delay (let consumer drain)
+        if call_sid and call_sid in _inbound_queues:
+            await _inbound_queues[call_sid].put(None)
+            await asyncio.sleep(2)
+            _inbound_queues.pop(call_sid, None)
 
 
 # ---- Twilio Media Streams WebSocket Handler ----
@@ -247,7 +479,7 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                 start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
                 end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
                 prefix_padding_ms=20,
-                silence_duration_ms=500,
+                silence_duration_ms=300,
             ),
         ),
     )
@@ -289,65 +521,132 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
             call_ended = asyncio.Event()
 
             # Gate: don't forward user audio until Sarah's greeting
-            # audio starts arriving. This matches the browser handler
-            # behavior (upstream flows during greeting, not after).
+            # audio starts arriving.
             greeting_started = asyncio.Event()
             upstream_forwarded = 0
-            upstream_discarded = 0
 
-            async def upstream_twilio():
-                """Receive mulaw from Twilio → decode → send PCM to Gemini.
+            async def drain_bidir_ws():
+                """Drain media events from the bidirectional WebSocket.
 
-                No buffering, no resampling. Decode mulaw→PCM and send each
-                chunk at native 8kHz. Gemini auto-resamples internally.
+                The bidirectional stream's inbound audio is silence (due to
+                Twilio AEC), so we just consume and discard events to keep
+                the WebSocket alive. Real audio comes from the one-way
+                inbound monitor via _inbound_queues.
                 """
-                nonlocal upstream_forwarded, upstream_discarded
                 try:
                     while not call_ended.is_set():
                         raw = await websocket.receive_text()
                         msg = json.loads(raw)
-                        event = msg.get("event")
+                        if msg.get("event") == "stop":
+                            logger.info("Bidirectional stream stopped")
+                            call_ended.set()
+                            return
+                except WebSocketDisconnect:
+                    logger.info("Bidirectional WebSocket disconnected")
+                    call_ended.set()
+                except Exception as exc:
+                    logger.error("Bidir drain error: %s", exc, exc_info=True)
+                    call_ended.set()
 
-                        if event == "media":
-                            if not greeting_started.is_set():
-                                upstream_discarded += 1
+            async def upstream_from_monitor():
+                """Read real audio from one-way inbound monitor queue,
+                resample to 16kHz PCM via soxr, send to Gemini.
+
+                Uses high-quality soxr resampling (matching Google's official
+                reference implementation) instead of audioop.ratecv which
+                introduces artifacts that break Gemini's VAD.
+                """
+                nonlocal upstream_forwarded
+
+                # Wait for the inbound monitor queue to appear
+                queue = None
+                for _ in range(50):  # up to 5 seconds
+                    queue = _inbound_queues.get(call_sid)
+                    if queue:
+                        break
+                    await asyncio.sleep(0.1)
+
+                if not queue:
+                    logger.error("No inbound monitor queue for callSid=%s", call_sid)
+                    return
+
+                logger.info("Upstream: connected to inbound monitor queue (callSid=%s)", call_sid)
+
+                try:
+                    while not call_ended.is_set():
+                        # Wait for greeting to start before forwarding
+                        if not greeting_started.is_set():
+                            try:
+                                mulaw_bytes = await asyncio.wait_for(queue.get(), timeout=0.5)
+                            except asyncio.TimeoutError:
                                 continue
+                            if mulaw_bytes is None:
+                                logger.info("Inbound monitor ended (pre-gate)")
+                                call_ended.set()
+                                return
+                            # Discard pre-greeting audio
+                            continue
 
-                            payload = msg["media"]["payload"]
-                            mulaw_bytes = base64.b64decode(payload)
-                            # Decode mulaw to 16-bit PCM at native 8kHz
-                            pcm_8k = audioop.ulaw2lin(mulaw_bytes, 2)
-                            upstream_forwarded += 1
-                            if upstream_forwarded <= 5 or upstream_forwarded % 100 == 0:
-                                rms = audioop.rms(pcm_8k, 2)
-                                logger.info(
-                                    "Twilio upstream #%d: %d bytes "
-                                    "rms=%d (discarded %d)",
-                                    upstream_forwarded, len(pcm_8k),
-                                    rms, upstream_discarded,
-                                )
-                            await session.send_realtime_input(
-                                audio=types.Blob(
-                                    mime_type="audio/pcm;rate=8000",
-                                    data=pcm_8k,
-                                )
-                            )
-
-                        elif event == "stop":
-                            logger.info(
-                                "Twilio stream stopped (fwd=%d, discarded=%d)",
-                                upstream_forwarded, upstream_discarded,
-                            )
+                        # Read from queue with timeout
+                        try:
+                            mulaw_bytes = await asyncio.wait_for(queue.get(), timeout=1.0)
+                        except asyncio.TimeoutError:
+                            continue
+                        if mulaw_bytes is None:
+                            logger.info("Inbound monitor ended")
                             call_ended.set()
                             return
 
-                except WebSocketDisconnect:
-                    logger.info("Twilio WebSocket disconnected (upstream, fwd=%d)",
-                                upstream_forwarded)
-                    call_ended.set()
+                        # Decode mulaw → PCM 8kHz
+                        pcm_8k = audioop.ulaw2lin(mulaw_bytes, 2)
+
+                        # High-quality resample 8kHz → 16kHz using soxr
+                        # (matches Google's official reference implementation)
+                        samples_8k = np.frombuffer(pcm_8k, dtype=np.int16).astype(np.float64)
+                        samples_16k = soxr.resample(samples_8k, 8000, 16000)
+                        pcm_16k = samples_16k.astype(np.int16).tobytes()
+
+                        upstream_forwarded += 1
+                        if upstream_forwarded <= 20 or upstream_forwarded % 100 == 0:
+                            rms = audioop.rms(pcm_16k, 2)
+                            logger.info(
+                                "Upstream #%d: %d bytes rms=%d (soxr 16kHz→Gemini)",
+                                upstream_forwarded, len(pcm_16k), rms,
+                            )
+
+                        await session.send_realtime_input(
+                            audio=types.Blob(
+                                data=pcm_16k,
+                                mime_type="audio/pcm;rate=16000",
+                            )
+                        )
+
                 except Exception as exc:
-                    logger.error("Twilio upstream error: %s", exc, exc_info=True)
+                    logger.error("Upstream monitor error: %s", exc, exc_info=True)
                     call_ended.set()
+
+            async def heartbeat():
+                """Send silent audio every 5 seconds to keep Gemini stream alive.
+
+                Google's reference implementation sends 320 bytes of zeros
+                (10ms at 16kHz) as a keepalive. This prevents the session
+                from timing out during pauses.
+                """
+                silence = bytes(320)  # 10ms of silence at 16kHz, 16-bit
+                try:
+                    while not call_ended.is_set():
+                        await asyncio.sleep(5.0)
+                        if call_ended.is_set():
+                            return
+                        if greeting_started.is_set():
+                            await session.send_realtime_input(
+                                audio=types.Blob(
+                                    data=silence,
+                                    mime_type="audio/pcm;rate=16000",
+                                )
+                            )
+                except Exception as exc:
+                    logger.debug("Heartbeat ended: %s", exc)
 
             downstream_count = 0
 
@@ -438,9 +737,8 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                             if hasattr(sc, "turn_complete") and sc.turn_complete:
                                 logger.info(
                                     "Sarah turn complete (was_speaking=%s, "
-                                    "upstream_fwd=%d, discarded=%d)",
+                                    "upstream_fwd=%d)",
                                     was_speaking, upstream_forwarded,
-                                    upstream_discarded,
                                 )
                                 was_speaking = False
                                 sarah_speaking.clear()
@@ -521,15 +819,15 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
             # ---- Run concurrent tasks ----
             try:
                 results = await asyncio.gather(
-                    upstream_twilio(),
+                    drain_bidir_ws(),
+                    upstream_from_monitor(),
                     downstream_gemini(),
+                    heartbeat(),
                     watchdog(),
                     return_exceptions=True,
                 )
-                # Log any exceptions from the tasks
-                for i, (name, result) in enumerate(
-                    zip(["upstream", "downstream", "watchdog"], results)
-                ):
+                task_names = ["drain_bidir", "upstream_monitor", "downstream", "heartbeat", "watchdog"]
+                for name, result in zip(task_names, results):
                     if isinstance(result, Exception):
                         logger.error(
                             "Twilio task '%s' failed: %s", name, result,

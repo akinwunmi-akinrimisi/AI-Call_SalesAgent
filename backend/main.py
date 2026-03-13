@@ -155,10 +155,42 @@ async def twilio_voice(request: Request):
     return Response(content=twiml, media_type="application/xml")
 
 
+@app.websocket("/ws/twilio/inbound")
+async def twilio_inbound_monitor(websocket: WebSocket):
+    """One-way inbound audio monitor — receives real caller audio."""
+    await twilio_handler.handle_inbound_monitor(websocket)
+
+
 @app.websocket("/ws/twilio/stream")
 async def twilio_stream(websocket: WebSocket):
     """Twilio Media Streams WebSocket — bridges phone audio with Gemini."""
     await twilio_handler.handle_twilio_stream(websocket)
+
+
+@app.websocket("/ws/twilio/diagnostic")
+async def twilio_diagnostic_stream(websocket: WebSocket):
+    """One-way diagnostic stream to test if Twilio sends real audio."""
+    await twilio_handler.handle_diagnostic_stream(websocket)
+
+
+@app.api_route("/twilio/diagnostic", methods=["GET", "POST"])
+async def twilio_diagnostic_voice(request: Request):
+    """Diagnostic TwiML — accepts ?mode=oneway|bidir_silent|bidir_hybrid."""
+    base_url = str(request.base_url).rstrip("/")
+    base_url = base_url.replace("http://", "https://")
+    mode = request.query_params.get("mode", "oneway")
+    twiml = twilio_handler.generate_diagnostic_twiml(base_url, mode=mode)
+    logger.info("Diagnostic TwiML mode=%s: %s", mode, twiml)
+    return Response(content=twiml, media_type="application/xml")
+
+
+@app.api_route("/twilio/diagnostic-done", methods=["GET", "POST"])
+async def twilio_diagnostic_done(request: Request):
+    """Gather callback for diagnostic — just hang up."""
+    response = twilio_handler.VoiceResponse()
+    response.say("Diagnostic complete. Goodbye.", voice="Polly.Amy")
+    response.hangup()
+    return Response(content=str(response), media_type="application/xml")
 
 
 @app.api_route("/twilio/recording", methods=["GET", "POST"])
