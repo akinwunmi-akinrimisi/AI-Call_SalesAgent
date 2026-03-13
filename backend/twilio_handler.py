@@ -503,14 +503,18 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
         ) as session:
             logger.info("Gemini Live connected for Twilio call (lead=%s)", lead_id)
 
-            # Trigger Sarah's greeting via realtime input (NOT
-            # send_client_content) so the session stays in realtime
-            # mode. Using send_client_content followed by
-            # send_realtime_input caused Gemini to ignore audio.
-            await session.send_realtime_input(
-                text="Hello"
+            # Trigger Sarah's greeting via send_client_content.
+            # With manual VAD (disabled=True), send_realtime_input(text=)
+            # never gets "committed" because there's no activity_end.
+            # send_client_content with turn_complete=True works independently.
+            await session.send_client_content(
+                turns=types.Content(
+                    role="user",
+                    parts=[types.Part(text="Hello")],
+                ),
+                turn_complete=True,
             )
-            logger.info("Sent greeting trigger via send_realtime_input(text)")
+            logger.info("Sent greeting trigger via send_client_content(turn_complete=True)")
 
             # Track whether Sarah is currently speaking (for interruption detection)
             sarah_speaking = asyncio.Event()
