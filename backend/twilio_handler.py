@@ -550,11 +550,12 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
 
             async def upstream_from_monitor():
                 """Read real audio from one-way inbound monitor queue,
-                resample to 16kHz PCM via soxr, send to Gemini.
+                resample to 16kHz PCM via soxr, buffer to ~100ms, send to Gemini.
 
-                Uses high-quality soxr resampling (matching Google's official
-                reference implementation) instead of audioop.ratecv which
-                introduces artifacts that break Gemini's VAD.
+                Buffers 5 Twilio chunks (5×20ms = 100ms = 3200 bytes at 16kHz)
+                before sending, matching the chunk size browsers typically send.
+                Also saves first 10s of audio to /tmp/debug_inbound.raw for
+                verification.
                 """
                 nonlocal upstream_forwarded
 
@@ -571,6 +572,16 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                     return
 
                 logger.info("Upstream: connected to inbound monitor queue (callSid=%s)", call_sid)
+
+                # Debug: save first 10s of audio (500 chunks × 20ms)
+                debug_file = open("/tmp/debug_inbound.raw", "wb")
+                debug_chunks_written = 0
+                DEBUG_MAX_CHUNKS = 500  # 10 seconds
+
+                # Buffer for accumulating ~100ms of audio before sending
+                CHUNKS_PER_SEND = 5  # 5 × 20ms = 100ms
+                pcm_buffer = bytearray()
+                chunks_buffered = 0
 
                 try:
                     while not call_ended.is_set():
@@ -589,8 +600,26 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
 
                         # Read from queue with timeout
                         try:
-                            mulaw_bytes = await asyncio.wait_for(queue.get(), timeout=1.0)
+                            mulaw_bytes = await asyncio.wait_for(queue.get(), timeout=0.1)
                         except asyncio.TimeoutError:
+                            # Flush partial buffer on timeout (don't hold audio)
+                            if pcm_buffer:
+                                buf_bytes = bytes(pcm_buffer)
+                                upstream_forwarded += 1
+                                if upstream_forwarded <= 10 or upstream_forwarded % 50 == 0:
+                                    rms = audioop.rms(buf_bytes, 2)
+                                    logger.info(
+                                        "Upstream #%d: %d bytes rms=%d (flush, soxr 16kHz)",
+                                        upstream_forwarded, len(buf_bytes), rms,
+                                    )
+                                await session.send_realtime_input(
+                                    audio=types.Blob(
+                                        data=buf_bytes,
+                                        mime_type="audio/pcm;rate=16000",
+                                    )
+                                )
+                                pcm_buffer.clear()
+                                chunks_buffered = 0
                             continue
                         if mulaw_bytes is None:
                             logger.info("Inbound monitor ended")
@@ -601,29 +630,47 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
                         pcm_8k = audioop.ulaw2lin(mulaw_bytes, 2)
 
                         # High-quality resample 8kHz → 16kHz using soxr
-                        # (matches Google's official reference implementation)
                         samples_8k = np.frombuffer(pcm_8k, dtype=np.int16).astype(np.float64)
                         samples_16k = soxr.resample(samples_8k, 8000, 16000)
                         pcm_16k = samples_16k.astype(np.int16).tobytes()
 
-                        upstream_forwarded += 1
-                        if upstream_forwarded <= 20 or upstream_forwarded % 100 == 0:
-                            rms = audioop.rms(pcm_16k, 2)
-                            logger.info(
-                                "Upstream #%d: %d bytes rms=%d (soxr 16kHz→Gemini)",
-                                upstream_forwarded, len(pcm_16k), rms,
-                            )
+                        # Debug: save to file
+                        if debug_chunks_written < DEBUG_MAX_CHUNKS:
+                            debug_file.write(pcm_16k)
+                            debug_chunks_written += 1
+                            if debug_chunks_written == DEBUG_MAX_CHUNKS:
+                                debug_file.close()
+                                logger.info("Debug audio saved: /tmp/debug_inbound.raw (10s, 16kHz PCM16)")
 
-                        await session.send_realtime_input(
-                            audio=types.Blob(
-                                data=pcm_16k,
-                                mime_type="audio/pcm;rate=16000",
+                        # Accumulate into buffer
+                        pcm_buffer.extend(pcm_16k)
+                        chunks_buffered += 1
+
+                        # Send when buffer has ~100ms of audio
+                        if chunks_buffered >= CHUNKS_PER_SEND:
+                            buf_bytes = bytes(pcm_buffer)
+                            upstream_forwarded += 1
+                            if upstream_forwarded <= 10 or upstream_forwarded % 50 == 0:
+                                rms = audioop.rms(buf_bytes, 2)
+                                logger.info(
+                                    "Upstream #%d: %d bytes rms=%d (100ms, soxr 16kHz)",
+                                    upstream_forwarded, len(buf_bytes), rms,
+                                )
+                            await session.send_realtime_input(
+                                audio=types.Blob(
+                                    data=buf_bytes,
+                                    mime_type="audio/pcm;rate=16000",
+                                )
                             )
-                        )
+                            pcm_buffer.clear()
+                            chunks_buffered = 0
 
                 except Exception as exc:
                     logger.error("Upstream monitor error: %s", exc, exc_info=True)
                     call_ended.set()
+                finally:
+                    if not debug_file.closed:
+                        debug_file.close()
 
             async def heartbeat():
                 """Send silent audio every 5 seconds to keep Gemini stream alive.
