@@ -356,6 +356,147 @@ async def twilio_status(request: Request):
     return {"status": "ok"}
 
 
+# ---- n8n Pipeline API ----
+
+
+@app.get("/api/leads/ready")
+async def list_ready_leads():
+    """Return leads with status 'ready_for_call' — used by n8n call scheduler."""
+    url = (
+        f"{config.supabase_url}/rest/v1/leads"
+        "?status=eq.ready_for_call&select=id,name,phone,email,status"
+        "&order=created_at&limit=10"
+    )
+    headers = {
+        "apikey": config.supabase_service_key,
+        "Authorization": f"Bearer {config.supabase_service_key}",
+        "Accept": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        logger.error("Failed to fetch ready leads: %s", exc)
+        return JSONResponse(status_code=502, content={"error": str(exc)})
+
+
+@app.post("/api/leads")
+async def create_lead(request: Request):
+    """Create a new lead — used by n8n lead intake webhook."""
+    body = await request.json()
+    required = ["name", "phone"]
+    missing = [f for f in required if not body.get(f)]
+    if missing:
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Missing required fields: {missing}"},
+        )
+
+    lead_data = {
+        "name": body["name"],
+        "phone": body["phone"],
+        "email": body.get("email", ""),
+        "status": "ready_for_call",
+        "priority": body.get("priority", "medium"),
+    }
+    url = f"{config.supabase_url}/rest/v1/leads"
+    headers = {
+        "apikey": config.supabase_service_key,
+        "Authorization": f"Bearer {config.supabase_service_key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json=lead_data, headers=headers)
+            resp.raise_for_status()
+            result = resp.json()
+            from logger import log_event as _log
+            await _log(
+                "lead_created",
+                f"New lead created: {body['name']} ({body['phone']})",
+                lead_id=result[0]["id"] if result else None,
+            )
+            return result[0] if result else {"status": "created"}
+    except Exception as exc:
+        logger.error("Failed to create lead: %s", exc)
+        return JSONResponse(status_code=502, content={"error": str(exc)})
+
+
+@app.patch("/api/leads/{lead_id}/status")
+async def update_lead_status(lead_id: str, request: Request):
+    """Update lead status — used by n8n post-call routing."""
+    body = await request.json()
+    new_status = body.get("status")
+    if not new_status:
+        return JSONResponse(status_code=400, content={"error": "status required"})
+
+    url = f"{config.supabase_url}/rest/v1/leads?id=eq.{lead_id}"
+    headers = {
+        "apikey": config.supabase_service_key,
+        "Authorization": f"Bearer {config.supabase_service_key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.patch(
+                url, json={"status": new_status}, headers=headers, timeout=10
+            )
+            resp.raise_for_status()
+            return {"status": "updated", "lead_id": lead_id, "new_status": new_status}
+    except Exception as exc:
+        logger.error("Failed to update lead %s status: %s", lead_id, exc)
+        return JSONResponse(status_code=502, content={"error": str(exc)})
+
+
+@app.get("/api/pipeline/stats")
+async def pipeline_stats():
+    """Pipeline statistics — used by n8n monitoring and dashboards."""
+    headers = {
+        "apikey": config.supabase_service_key,
+        "Authorization": f"Bearer {config.supabase_service_key}",
+        "Accept": "application/json",
+    }
+    stats = {}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            # Total leads
+            r = await client.get(
+                f"{config.supabase_url}/rest/v1/leads?select=id",
+                headers={**headers, "Prefer": "count=exact", "Range": "0-0"},
+            )
+            stats["total_leads"] = int(r.headers.get("content-range", "0/0").split("/")[1])
+
+            # Leads by status
+            r = await client.get(
+                f"{config.supabase_url}/rest/v1/leads?select=status",
+                headers=headers,
+            )
+            leads = r.json()
+            status_counts = {}
+            for lead in leads:
+                s = lead.get("status", "unknown")
+                status_counts[s] = status_counts.get(s, 0) + 1
+            stats["leads_by_status"] = status_counts
+
+            # Recent call outcomes
+            r = await client.get(
+                f"{config.supabase_url}/rest/v1/call_logs"
+                "?select=outcome,duration_seconds,created_at"
+                "&order=created_at.desc&limit=20",
+                headers=headers,
+            )
+            stats["recent_calls"] = r.json()
+
+        return stats
+    except Exception as exc:
+        logger.error("Failed to fetch pipeline stats: %s", exc)
+        return JSONResponse(status_code=502, content={"error": str(exc)})
+
+
 # ---- ConversationRelay Integration ----
 
 
