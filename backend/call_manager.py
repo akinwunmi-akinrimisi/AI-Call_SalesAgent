@@ -195,17 +195,17 @@ async def process_call_end(session: CallSession) -> None:
         lead_status = "call_dropped"
         event_name = "call_dropped"
 
-    # Build call_log entry
+    # Build call_log entry — truncate transcript to avoid Supabase limits
     call_data = {
         "lead_id": session.lead_id,
         "status": call_status,
-        "outcome": outcome["outcome"],
-        "transcript": transcript,
-        "qualification_summary": outcome.get("qualification_summary", ""),
-        "recommended_programme": outcome.get("recommended_programme", ""),
-        "objections_raised": outcome.get("objections_raised", []),
+        "outcome": outcome.get("outcome", "CALL_DROPPED") if isinstance(outcome, dict) else str(outcome),
+        "transcript": transcript[:60000] if transcript else "",
+        "qualification_summary": str(outcome.get("qualification_summary", ""))[:5000] if isinstance(outcome, dict) else "",
+        "recommended_programme": str(outcome.get("recommended_programme", ""))[:500] if isinstance(outcome, dict) else "",
+        "objections_raised": outcome.get("objections_raised", []) if isinstance(outcome, dict) else [],
         "duration_seconds": duration,
-        "follow_up_preference": outcome.get("follow_up_preference", ""),
+        "follow_up_preference": str(outcome.get("follow_up_preference", ""))[:500] if isinstance(outcome, dict) else "",
     }
 
     # Write call log to Supabase
