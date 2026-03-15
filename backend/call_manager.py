@@ -13,6 +13,7 @@ Exports:
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from typing import TYPE_CHECKING
 
@@ -265,3 +266,25 @@ async def process_call_end(session: CallSession) -> None:
                 "recommended_programme": outcome.get("recommended_programme", ""),
             },
         )
+
+    # Notify n8n post-call router (WF3)
+    n8n_base = os.getenv("N8N_BASE_URL", "")
+    if n8n_base:
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(
+                    f"{n8n_base}/webhook/post-call",
+                    json={"lead_id": session.lead_id},
+                )
+                await client.post(
+                    f"{n8n_base}/webhook/admin-notification",
+                    json={"lead_id": session.lead_id},
+                )
+        except Exception as exc:
+            await log_event(
+                "n8n_notify_error",
+                f"Failed to notify n8n for lead {session.lead_id}: {exc}",
+                event_type="error",
+                lead_id=session.lead_id,
+            )
