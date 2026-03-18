@@ -58,13 +58,13 @@ def generate_conversation_relay_twiml(lead_id: str, base_url: str) -> str:
     ws_url = base_url.replace("https://", "wss://").replace("http://", "ws://")
 
     # Chirp3-HD: Google's most human-like generative voice
-    # Kore = warm, conversational female. Best tested voice.
+    # Testing Orus — confident, professional male voice
     twiml = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<Response>"
         "<Connect>"
         f'<ConversationRelay url="{ws_url}/ws/conversation-relay" '
-        f'voice="en-US-Chirp3-HD-Kore" '
+        f'voice="en-US-Chirp3-HD-Orus" '
         f'language="en-US" '
         f'ttsProvider="google" '
         f'transcriptionProvider="google" '
