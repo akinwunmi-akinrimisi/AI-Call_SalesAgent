@@ -29,7 +29,6 @@ import time
 import httpx
 from fastapi import WebSocket, WebSocketDisconnect
 from google import genai
-from google.cloud import firestore
 from google.genai import types
 
 from call_manager import CallSession, process_call_end
@@ -38,9 +37,6 @@ from knowledge_loader import build_system_instruction, load_knowledge_base
 from logger import log_event
 
 logger = logging.getLogger(__name__)
-
-# Module-level Firestore client (reused across calls)
-_firestore_client: firestore.AsyncClient | None = None
 
 # Valid call outcomes
 VALID_OUTCOMES = ("COMMITTED", "FOLLOW_UP", "DECLINED")
@@ -131,23 +127,6 @@ TOOL_DECLARATIONS = [
         ]
     )
 ]
-
-
-def get_firestore_client() -> firestore.AsyncClient:
-    """Get or create the module-level Firestore AsyncClient.
-
-    Uses the GCP project from config and service account credentials
-    from the path specified in config.google_application_credentials.
-
-    Returns:
-        Firestore AsyncClient instance.
-    """
-    global _firestore_client
-    if _firestore_client is None:
-        _firestore_client = firestore.AsyncClient(
-            project=config.gcp_project_id,
-        )
-    return _firestore_client
 
 
 async def fetch_lead(lead_id: str) -> dict | None:
@@ -264,10 +243,9 @@ async def handle_voice_session(websocket: WebSocket, lead_id: str) -> None:
     try:
         t0 = time.time()
 
-        # Run Supabase lead fetch + Firestore KB load in parallel
-        fs_client = get_firestore_client()
+        # Run Supabase lead fetch + KB load in parallel
         lead_task = fetch_lead(lead_id)
-        kb_task = load_knowledge_base(fs_client)
+        kb_task = load_knowledge_base()
         lead, kb_content = await asyncio.gather(lead_task, kb_task)
 
         if lead is None:

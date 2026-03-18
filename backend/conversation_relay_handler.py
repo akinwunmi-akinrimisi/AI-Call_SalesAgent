@@ -34,7 +34,6 @@ from voice_handler import (
     WATCHDOG_FINAL_SECONDS,
     _handle_tool_call,
     fetch_lead,
-    get_firestore_client,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,6 +58,7 @@ def generate_conversation_relay_twiml(lead_id: str, base_url: str) -> str:
 
     # Chirp3-HD: Google's most human-like generative voice
     # Kore = warm, conversational female. Best tested voice.
+    # STT tuning: low interrupt sensitivity + hints for domain terms
     twiml = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<Response>"
@@ -68,8 +68,13 @@ def generate_conversation_relay_twiml(lead_id: str, base_url: str) -> str:
         f'language="en-US" '
         f'ttsProvider="google" '
         f'transcriptionProvider="google" '
-        f'interruptible="true" '
+        f'speechModel="telephony" '
+        f'interruptible="speech" '
+        f'interruptSensitivity="low" '
         f'welcomeGreeting="" '
+        f'hints="Cloudboosta,DevOps,cloud,programme,AWS,Azure,GCP,training,'
+        f'certification,Kubernetes,Docker,Terraform,CI/CD,Linux,SysAdmin,'
+        f'career,salary,Nigeria,UK,United Kingdom" '
         f">"
         f'<Parameter name="lead_id" value="{lead_id}" />'
         f"</ConversationRelay>"
@@ -124,10 +129,9 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
 
     try:
         t0 = time.time()
-        fs_client = get_firestore_client()
         lead, kb_content = await asyncio.gather(
             fetch_lead(lead_id),
-            load_knowledge_base(fs_client),
+            load_knowledge_base(),
         )
 
         if lead is None:
@@ -184,8 +188,39 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
     call_ended = asyncio.Event()
     chat_lock = asyncio.Lock()
 
-    async def message_loop():
+    # Debounce: accumulate speech fragments before sending to Gemini
+    DEBOUNCE_SECONDS = 1.5
+    speech_buffer: list[str] = []
+    debounce_task: asyncio.Task | None = None
+
+    async def _flush_speech():
+        """Wait for debounce period, then send accumulated speech to Gemini."""
         nonlocal cancel_event
+        await asyncio.sleep(DEBOUNCE_SECONDS)
+
+        if not speech_buffer:
+            return
+
+        combined = " ".join(speech_buffer).strip()
+        speech_buffer.clear()
+
+        if not combined:
+            return
+
+        logger.info("CR >>> User: %s", combined)
+        call_session.append_user_transcript(combined)
+
+        cancel_event.set()
+        cancel_event = asyncio.Event()
+
+        async with chat_lock:
+            await _gemini_respond(
+                chat, combined, call_session, websocket,
+                cancel_event,
+            )
+
+    async def message_loop():
+        nonlocal cancel_event, debounce_task
         try:
             while not call_ended.is_set():
                 raw = await websocket.receive_text()
@@ -197,17 +232,11 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
                     if not voice_prompt.strip():
                         continue
 
-                    logger.info("CR >>> User: %s", voice_prompt)
-                    call_session.append_user_transcript(voice_prompt)
-
-                    cancel_event.set()
-                    cancel_event = asyncio.Event()
-
-                    async with chat_lock:
-                        await _gemini_respond(
-                            chat, voice_prompt, call_session, websocket,
-                            cancel_event,
-                        )
+                    # Accumulate speech and reset debounce timer
+                    speech_buffer.append(voice_prompt.strip())
+                    if debounce_task and not debounce_task.done():
+                        debounce_task.cancel()
+                    debounce_task = asyncio.create_task(_flush_speech())
 
                 elif msg_type == "interrupt":
                     utterance = msg.get("utteranceUntilInterrupt", "")
@@ -228,6 +257,8 @@ async def handle_conversation_relay(websocket: WebSocket) -> None:
         except Exception as exc:
             logger.error("CR receive error: %s", exc, exc_info=True)
         finally:
+            if debounce_task and not debounce_task.done():
+                debounce_task.cancel()
             call_ended.set()
 
     async def watchdog_10min():

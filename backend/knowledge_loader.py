@@ -1,15 +1,15 @@
-"""Firestore knowledge base pre-loader and system instruction builder.
+"""Supabase knowledge base loader and system instruction builder.
 
-Fetches all 5 KB documents from Firestore at call start and builds Sarah's
+Fetches all KB documents from Supabase at call start and builds Sarah's
 complete system instruction including persona, AI disclosure, qualification
 flow, programme recommendations, objection handling rules, commitment
 thresholds, watchdog behavior, and the full knowledge base content.
 
 KB content is cached in-memory with a 5-minute TTL so that consecutive
-calls don't re-fetch 42K chars from Firestore every time.
+calls don't re-fetch from Supabase every time.
 
 Exports:
-    load_knowledge_base: Fetch and concatenate all KB documents from Firestore.
+    load_knowledge_base: Fetch and concatenate all KB documents from Supabase.
     build_system_instruction: Build the complete system instruction for Sarah.
 """
 
@@ -18,10 +18,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from google.cloud import firestore
+import httpx
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +39,10 @@ _kb_cache_time: float = 0.0
 _KB_CACHE_TTL = 300.0  # 5 minutes
 
 
-async def load_knowledge_base(db: "firestore.AsyncClient") -> str:
-    """Fetch all KB docs from Firestore and return concatenated content.
+async def load_knowledge_base() -> str:
+    """Fetch all KB docs from Supabase and return concatenated content.
 
     Uses a 5-minute in-memory cache to avoid re-fetching on every call.
-    Reads all 5 documents in parallel via asyncio.gather for speed.
-
-    Args:
-        db: Firestore AsyncClient instance.
 
     Returns:
         Concatenated KB content with section headers and separators.
@@ -59,17 +54,25 @@ async def load_knowledge_base(db: "firestore.AsyncClient") -> str:
         logger.info("KB cache hit (%d chars, age %.0fs)", len(_kb_cache), time.time() - _kb_cache_time)
         return _kb_cache
 
-    # Fetch all documents in parallel
-    tasks = [
-        db.collection("knowledge_base").document(doc_id).get()
-        for doc_id in KB_DOCS
-    ]
-    docs = await asyncio.gather(*tasks)
+    # Fetch from Supabase
+    url = f"{config.supabase_url}/rest/v1/knowledge_base"
+    headers = {
+        "apikey": config.supabase_service_key,
+        "Authorization": f"Bearer {config.supabase_service_key}",
+    }
+    params = {"select": "id,content", "order": "id"}
 
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(url, headers=headers, params=params)
+        resp.raise_for_status()
+        rows = resp.json()
+
+    # Build content in KB_DOCS order
+    doc_map = {row["id"]: row["content"] for row in rows}
     sections = []
-    for doc_id, doc in zip(KB_DOCS, docs):
-        if doc.exists:
-            content = doc.to_dict().get("content", "")
+    for doc_id in KB_DOCS:
+        content = doc_map.get(doc_id, "")
+        if content:
             sections.append(f"## {doc_id.replace('-', ' ').title()}\n\n{content}")
 
     result = "\n\n---\n\n".join(sections)
@@ -77,7 +80,7 @@ async def load_knowledge_base(db: "firestore.AsyncClient") -> str:
     # Update cache
     _kb_cache = result
     _kb_cache_time = time.time()
-    logger.info("KB loaded from Firestore (%d chars, %d docs)", len(result), len(sections))
+    logger.info("KB loaded from Supabase (%d chars, %d docs)", len(result), len(sections))
 
     return result
 
