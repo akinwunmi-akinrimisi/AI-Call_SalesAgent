@@ -42,7 +42,6 @@ from voice_handler import (
     WATCHDOG_SECONDS,
     _handle_tool_call,
     fetch_lead,
-    get_firestore_client,
 )
 
 logger = logging.getLogger(__name__)
@@ -434,10 +433,9 @@ async def handle_twilio_stream(websocket: WebSocket) -> None:
 
     try:
         t0 = time.time()
-        fs_client = get_firestore_client()
         lead, kb_content = await asyncio.gather(
             fetch_lead(lead_id),
-            load_knowledge_base(fs_client),
+            load_knowledge_base(),
         )
 
         if lead is None:
